@@ -18,7 +18,8 @@ let package = Package(
                 "Defaults",
             ],
             path: "LightShotClone",
-            exclude: ["App/Info.plist"]
+            exclude: ["App/Info.plist"],
+            resources: [.process("Resources/Assets.xcassets")]
         ),
         .testTarget(
             name: "LightShotCloneTests",
