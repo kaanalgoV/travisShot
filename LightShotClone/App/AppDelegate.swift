@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var annotationVM = AnnotationViewModel()
     private var annotationWindow: NSWindow?
     private var localKeyMonitor: Any?
+    private var scrollMonitor: Any?
 
     private var screenCapture: CGImage?
     private var currentSelectionRect: CGRect?
@@ -92,10 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         actionToolbar = actToolbar
 
         installKeyMonitor()
+        installScrollMonitor()
     }
 
     private func showAnnotationCanvas(rect: CGRect, screen: NSScreen) {
-        let window = NSWindow(
+        let window = NonDraggableWindow(
             contentRect: rect,
             styleMask: [.borderless],
             backing: .buffered,
@@ -107,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.level = NSWindow.Level(Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
         window.hasShadow = false
         window.ignoresMouseEvents = false
+        window.isMovable = false
+        window.isMovableByWindowBackground = false
 
         let canvasView = AnnotationCanvasView(
             viewModel: annotationVM,
@@ -160,10 +164,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func installScrollMonitor() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self = self else { return event }
+            if event.scrollingDeltaY != 0 {
+                let delta: CGFloat = event.scrollingDeltaY > 0 ? 1.0 : -1.0
+                self.annotationVM.adjustSize(delta: delta)
+            }
+            return event
+        }
+    }
+
     private func removeKeyMonitor() {
         if let monitor = localKeyMonitor {
             NSEvent.removeMonitor(monitor)
             localKeyMonitor = nil
+        }
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
         }
     }
 

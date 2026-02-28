@@ -14,7 +14,7 @@ final class OverlayWindowController {
         }
 
         for screen in NSScreen.screens {
-            let window = NSWindow(
+            let window = NonDraggableWindow(
                 contentRect: screen.frame,
                 styleMask: [.borderless],
                 backing: .buffered,
@@ -28,6 +28,8 @@ final class OverlayWindowController {
             window.hasShadow = false
             window.ignoresMouseEvents = false
             window.acceptsMouseMovedEvents = true
+            window.isMovable = false
+            window.isMovableByWindowBackground = false
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
             let overlayView = SelectionOverlayView(

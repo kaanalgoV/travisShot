@@ -31,8 +31,9 @@ final class ActionToolbarController {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.level = NSWindow.Level(Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
+        panel.level = NSWindow.Level(Int(CGWindowLevelForKey(.screenSaverWindow)) + 2)
         panel.hasShadow = false
+        panel.isMovable = false
         panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
