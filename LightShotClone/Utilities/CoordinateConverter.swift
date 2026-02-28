@@ -13,12 +13,7 @@ enum CoordinateConverter {
 
     /// Normalize a rect that may have negative width/height (from dragging in reverse)
     static func normalize(_ rect: CGRect) -> CGRect {
-        CGRect(
-            x: min(rect.origin.x, rect.origin.x + rect.width),
-            y: min(rect.origin.y, rect.origin.y + rect.height),
-            width: abs(rect.width),
-            height: abs(rect.height)
-        )
+        rect.standardized
     }
 
     /// Scale a rect by a factor (e.g., for Retina displays)
