@@ -30,8 +30,7 @@ struct LightShotCloneApp: App {
         }
 
         Settings {
-            Text("Settings coming in Task 11")
-                .frame(width: 400, height: 200)
+            SettingsView()
         }
     }
 }
