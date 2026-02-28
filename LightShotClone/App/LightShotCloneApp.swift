@@ -1,4 +1,5 @@
 import SwiftUI
+import KeyboardShortcuts
 
 @main
 struct LightShotCloneApp: App {
@@ -9,7 +10,16 @@ struct LightShotCloneApp: App {
             Button("Capture Region") {
                 appDelegate.startRegionCapture()
             }
-            .keyboardShortcut("9", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Preferences...") {
+                if #available(macOS 14, *) {
+                    NSApp.activate()
+                }
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+            .keyboardShortcut(",")
 
             Divider()
 
@@ -20,7 +30,8 @@ struct LightShotCloneApp: App {
         }
 
         Settings {
-            Text("Settings placeholder")
+            Text("Settings coming in Task 11")
+                .frame(width: 400, height: 200)
         }
     }
 }
