@@ -29,7 +29,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.disableAutomaticTermination("TravisShot menu bar app")
         ProcessInfo.processInfo.disableSuddenTermination()
+        migrateHotkeysIfNeeded()
         registerHotkeys()
+    }
+
+    /// One-time migration: reset global hotkeys so code defaults (Cmd+^) take effect
+    private func migrateHotkeysIfNeeded() {
+        guard !Defaults[.hotkeyMigrationV2] else { return }
+        KeyboardShortcuts.reset(.captureRegion)
+        KeyboardShortcuts.reset(.captureFullScreen)
+        KeyboardShortcuts.reset(.instantUploadFullScreen)
+        Defaults[.hotkeyMigrationV2] = true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

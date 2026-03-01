@@ -8,6 +8,9 @@ extension KeyboardShortcuts.Name {
 }
 
 extension Defaults.Keys {
+    /// Migration flag to force-reset global hotkeys to correct defaults
+    static let hotkeyMigrationV2 = Key<Bool>("hotkeyMigrationV2", default: false)
+
     static let autoCopyLinkAfterUpload = Key<Bool>("autoCopyLinkAfterUpload", default: true)
     static let showNotifications = Key<Bool>("showNotifications", default: true)
     static let keepSelectionPosition = Key<Bool>("keepSelectionPosition", default: false)
