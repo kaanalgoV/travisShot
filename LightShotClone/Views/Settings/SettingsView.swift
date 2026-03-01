@@ -18,6 +18,7 @@ struct SettingsView: View {
                     Label("Formats", systemImage: "doc")
                 }
         }
-        .frame(width: 480, height: 350)
+        .frame(minWidth: 480, idealWidth: 520, maxWidth: 700,
+               minHeight: 350, idealHeight: 500, maxHeight: 800)
     }
 }

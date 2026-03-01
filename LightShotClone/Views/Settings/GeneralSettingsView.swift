@@ -1,6 +1,6 @@
-import SwiftUI
 import Defaults
 import LaunchAtLogin
+import SwiftUI
 
 struct GeneralSettingsView: View {
     @Default(.autoCopyLinkAfterUpload) var autoCopyLink
@@ -9,16 +9,23 @@ struct GeneralSettingsView: View {
     @Default(.captureCursor) var captureCursor
 
     var body: some View {
-        Form {
-            Toggle("Automatically copy link after uploading", isOn: $autoCopyLink)
-            Toggle("Show notifications about copying/saving", isOn: $showNotifications)
-            Toggle("Keep selected area position", isOn: $keepSelection)
-            Toggle("Capture cursor on screenshot", isOn: $captureCursor)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
 
-            Divider()
+                SettingsSection(title: "Behavior", icon: "cursorarrow.click") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Automatically copy link after uploading", isOn: $autoCopyLink)
+                        Toggle("Show notifications about copying/saving", isOn: $showNotifications)
+                        Toggle("Keep selected area position", isOn: $keepSelection)
+                        Toggle("Capture cursor on screenshot", isOn: $captureCursor)
+                    }
+                }
 
-            LaunchAtLogin.Toggle("Launch at login")
+                SettingsSection(title: "System", icon: "laptopcomputer") {
+                    LaunchAtLogin.Toggle("Launch at login")
+                }
+            }
+            .padding(20)
         }
-        .padding(20)
     }
 }

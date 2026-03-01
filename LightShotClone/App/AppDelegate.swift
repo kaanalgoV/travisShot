@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localKeyMonitor: Any?
     private var settingsWindow: NSWindow?
 
+    /// Set to true only when the user explicitly clicks "Quit"
+    var userRequestedQuit = false
+
     private var screenCapture: CGImage?
     /// Selection rect in SwiftUI coordinates (top-left origin) - used for image cropping
     private var selectionRectForCrop: CGRect?
@@ -24,14 +27,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastSelectionSwiftUIRect: CGRect?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // LSUIElement=YES in Info.plist handles hiding from Dock.
-        // Do NOT call NSApp.setActivationPolicy(.accessory) — it interferes with
-        // SwiftUI lifecycle and causes the app to terminate when windows close.
+        ProcessInfo.processInfo.disableAutomaticTermination("TravisShot menu bar app")
+        ProcessInfo.processInfo.disableSuddenTermination()
         registerHotkeys()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Hard gate: block ALL termination unless the user explicitly clicked Quit
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if userRequestedQuit {
+            return .terminateNow
+        }
+        debugLog("Blocked unexpected termination attempt")
+        return .terminateCancel
+    }
+
+    private func debugLog(_ msg: String) {
+        let line = "[\(Date())] \(msg)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: "/tmp/travisshot_debug.log") {
+                if let fh = FileHandle(forWritingAtPath: "/tmp/travisshot_debug.log") {
+                    fh.seekToEndOfFile()
+                    fh.write(data)
+                    fh.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: "/tmp/travisshot_debug.log", contents: data)
+            }
+        }
     }
 
     // MARK: - Preferences
@@ -45,12 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 350),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 500),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "TravisShot Settings"
+        window.minSize = NSSize(width: 480, height: 350)
+        window.maxSize = NSSize(width: 700, height: 800)
         window.contentView = NSHostingView(rootView: SettingsView())
         window.center()
         window.isReleasedWhenClosed = false
@@ -98,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.onCancel = { [weak self] in
                 self?.dismissAll()
             }
-            overlay.showOverlays()
+            overlay.showOverlays(frozenImage: screenCapture)
 
             if Defaults[.keepSelectionPosition], let lastRect = lastSelectionSwiftUIRect {
                 overlay.restoreSelection(lastRect)
@@ -135,10 +163,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         showAnnotationCanvas(screenRect: screenRect, screen: screen)
 
-        let editToolbar = EditingToolbarController(annotationVM: annotationVM)
-        editToolbar.show(near: screenRect, onClose: { [weak self] in
-            self?.dismissAll()
-        })
+        let editToolbar = EditingToolbarController(annotationVM: annotationVM, isFrozen: screenCapture != nil)
+        editToolbar.show(
+            near: screenRect,
+            onToggleFreeze: { [weak self] in
+                guard let self = self else { return }
+                if editToolbar.isFrozen {
+                    self.overlayController?.unfreeze()
+                    editToolbar.setFrozen(false)
+                } else {
+                    self.captureAndFreeze(editToolbar: editToolbar)
+                }
+            },
+            onClose: { [weak self] in
+                self?.dismissAll()
+            }
+        )
         editingToolbar = editToolbar
 
         let actToolbar = ActionToolbarController()
@@ -170,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.ignoresMouseEvents = false
         window.isMovable = false
         window.isMovableByWindowBackground = false
+        window.isReleasedWhenClosed = false
 
         let canvas = DrawingCanvasNSView(
             viewModel: annotationVM,
@@ -187,35 +228,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Keyboard Shortcuts During Capture
 
     private func installKeyMonitor() {
+        debugLog("installKeyMonitor called")
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
 
             let cmd = event.modifierFlags.contains(.command)
+            let char = event.charactersIgnoringModifiers?.lowercased()
 
             if event.keyCode == 53 { // Escape
                 self.dismissAll()
                 return nil
             }
 
-            if cmd {
-                switch event.charactersIgnoringModifiers {
-                case "c":
-                    self.copyToClipboard()
-                    return nil
-                case "s":
-                    self.saveToFile()
-                    return nil
-                case "d":
-                    self.uploadScreenshot()
-                    return nil
-                case "p":
-                    self.printScreenshot()
-                    return nil
-                case "z":
+            // Cmd+key: action shortcuts (configurable)
+            if cmd, let char = char {
+                if char == Defaults[.shortcutCopy] { self.copyToClipboard(); return nil }
+                if char == Defaults[.shortcutSave] { self.saveToFile(); return nil }
+                if char == Defaults[.shortcutUpload] { self.uploadScreenshot(); return nil }
+                if char == Defaults[.shortcutPrint] { self.printScreenshot(); return nil }
+                if char == Defaults[.shortcutUndo] {
                     self.annotationVM.undo()
                     self.drawingCanvas?.forceRedraw()
                     return nil
-                default: break
+                }
+            }
+
+            // No modifier: tool shortcuts (configurable)
+            if !cmd, let char = char {
+                self.debugLog("Key pressed: '\(char)' (no cmd)")
+                if char == Defaults[.shortcutPen] { self.annotationVM.selectTool(.pen); return nil }
+                if char == Defaults[.shortcutLine] { self.annotationVM.selectTool(.line); return nil }
+                if char == Defaults[.shortcutArrow] { self.annotationVM.selectTool(.arrow); return nil }
+                if char == Defaults[.shortcutRectangle] { self.annotationVM.selectTool(.rectangle); return nil }
+                if char == Defaults[.shortcutText] { self.annotationVM.selectTool(.text); return nil }
+                if char == Defaults[.shortcutMarker] { self.annotationVM.selectTool(.marker); return nil }
+                if char == Defaults[.shortcutFreeze] {
+                    if let toolbar = self.editingToolbar {
+                        if toolbar.isFrozen {
+                            self.overlayController?.unfreeze()
+                            toolbar.setFrozen(false)
+                        } else {
+                            self.captureAndFreeze(editToolbar: toolbar)
+                        }
+                    }
+                    return nil
                 }
             }
 
@@ -230,13 +286,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Freeze
+
+    private func captureAndFreeze(editToolbar: EditingToolbarController) {
+        Task { @MainActor in
+            do {
+                let displays = try await ScreenCaptureService.availableDisplays()
+                guard let display = displays.first else { return }
+                let newCapture = try await ScreenCaptureService.captureFullScreen(
+                    display: display,
+                    showCursor: Defaults[.captureCursor]
+                )
+                self.screenCapture = newCapture
+                self.overlayController?.freeze(newImage: newCapture)
+                editToolbar.setFrozen(true)
+            } catch {
+                debugLog("Re-freeze capture failed: \(error)")
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func getFinalImage() -> NSImage? {
         // Use SwiftUI rect (top-left origin) for cropping - matches CGImage coordinate system
         guard let capture = screenCapture, let rect = selectionRectForCrop else { return nil }
 
-        let scale = currentScreen?.backingScaleFactor ?? 2.0
+        // Compute actual scale from CGImage vs screen dimensions (handles both point/pixel SCDisplay)
+        let screenWidth = currentScreen?.frame.width ?? 1440
+        let scale = CGFloat(capture.width) / screenWidth
         let scaledRect = CGRect(
             x: rect.origin.x * scale,
             y: rect.origin.y * scale,
@@ -260,10 +338,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func saveToFile() {
         guard let image = getFinalImage() else { return }
+        dismissAll() // Dismiss overlays first so save dialog is not hidden behind them
         Task { @MainActor in
             let _ = await FileSaveService.saveWithDialog(image)
             showSuccessFeedback("Screenshot saved")
-            dismissAll()
         }
     }
 
@@ -394,6 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Dismiss
 
     private func dismissAll() {
+        debugLog("dismissAll called")
         removeKeyMonitor()
         drawingCanvas?.commitTextField()
         drawingCanvas = nil
