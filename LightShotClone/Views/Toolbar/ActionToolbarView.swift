@@ -8,18 +8,18 @@ struct ActionToolbarView: View {
     var onSave: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ActionButton(systemImage: "icloud.and.arrow.up", tooltip: "Upload (Cmd+D)", action: onUpload)
             ActionButton(systemImage: "magnifyingglass", tooltip: "Search Similar Images", action: onSearchSimilar)
             ActionButton(systemImage: "printer", tooltip: "Print (Cmd+P)", action: onPrint)
             ActionButton(systemImage: "doc.on.clipboard", tooltip: "Copy (Cmd+C)", action: onCopy)
             ActionButton(systemImage: "square.and.arrow.down", tooltip: "Save (Cmd+S)", action: onSave)
         }
-        .padding(6)
+        .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         )
     }
 }
@@ -29,14 +29,25 @@ struct ActionButton: View {
     let tooltip: String
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 14))
-                .frame(width: 28, height: 28)
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isHovered ? Color.primary.opacity(0.1) : Color.clear)
+                )
                 .foregroundColor(.primary)
+                .scaleEffect(isHovered ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .help(tooltip)
     }
 }

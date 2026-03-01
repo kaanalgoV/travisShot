@@ -11,7 +11,20 @@ final class AnnotationViewModel: ObservableObject {
     @Published var textEditPosition: CGPoint = .zero
     @Published var textEditContent: String = ""
 
-    private var undoStack: [[Annotation]] = []
+    var undoStack: [[Annotation]] = []
+    private let maxUndoSteps = 50
+
+    private func pushUndo() {
+        undoStack.append(annotations)
+        if undoStack.count > maxUndoSteps {
+            undoStack.removeFirst(undoStack.count - maxUndoSteps)
+        }
+    }
+
+    func addAnnotation(_ annotation: Annotation) {
+        pushUndo()
+        annotations.append(annotation)
+    }
 
     // MARK: - Tool Selection
 
@@ -73,7 +86,7 @@ final class AnnotationViewModel: ObservableObject {
         }
         annotation.endPoint = point
 
-        undoStack.append(annotations)
+        pushUndo()
         annotations.append(annotation)
         currentAnnotation = nil
     }
@@ -96,7 +109,7 @@ final class AnnotationViewModel: ObservableObject {
             fontSize: currentFontSize
         )
 
-        undoStack.append(annotations)
+        pushUndo()
         annotations.append(annotation)
         isEditingText = false
         textEditContent = ""
@@ -121,26 +134,30 @@ final class AnnotationViewModel: ObservableObject {
     }
 
     /// Render all annotations onto a CGImage and return the composited result
-    func renderAnnotations(onto image: CGImage, selectionRect: CGRect) -> CGImage? {
-        let width = Int(selectionRect.width)
-        let height = Int(selectionRect.height)
+    func renderAnnotations(onto image: CGImage, selectionRect: CGRect, scale: CGFloat = 2.0) -> CGImage? {
+        let pixelWidth = image.width
+        let pixelHeight = image.height
 
         guard let context = CGContext(
             data: nil,
-            width: width,
-            height: height,
+            width: pixelWidth,
+            height: pixelHeight,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        // Draw the base image
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // Draw the base image at full pixel resolution
+        context.draw(image, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
 
-        // Draw annotations
+        // Scale and flip for annotations (SwiftUI uses top-left origin, CGContext uses bottom-left)
+        context.translateBy(x: 0, y: CGFloat(pixelHeight))
+        context.scaleBy(x: scale, y: -scale)
+
+        // Draw annotations in logical (1x) coordinates
         for annotation in annotations {
-            AnnotationRenderer.draw(annotation, in: context, canvasSize: CGSize(width: width, height: height))
+            AnnotationRenderer.draw(annotation, in: context, canvasSize: selectionRect.size)
         }
 
         return context.makeImage()

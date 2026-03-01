@@ -9,7 +9,7 @@ enum ScreenCaptureError: Error {
 
 final class ScreenCaptureService {
     /// Capture the entire screen as a CGImage (excluding our own app windows)
-    static func captureFullScreen(display: SCDisplay) async throws -> CGImage {
+    static func captureFullScreen(display: SCDisplay, showCursor: Bool = false) async throws -> CGImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
 
         // Exclude our own app from the capture
@@ -26,7 +26,7 @@ final class ScreenCaptureService {
         config.width = display.width * 2  // Retina
         config.height = display.height * 2 // Retina
         config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = false
+        config.showsCursor = showCursor
 
         return try await SCScreenshotManager.captureImage(
             contentFilter: filter,

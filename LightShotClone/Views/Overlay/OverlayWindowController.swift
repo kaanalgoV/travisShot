@@ -42,15 +42,24 @@ final class OverlayWindowController {
             windows.append(window)
         }
 
-        // Set cursor to crosshair
         NSCursor.crosshair.push()
 
-        // Listen for selection completion
         viewModel.onSelectionComplete = { [weak self] rect in
             guard let self = self else { return }
             let screen = NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.main ?? NSScreen.screens[0]
             self.onSelectionComplete?(rect, screen)
         }
+    }
+
+    /// Restore a previously saved selection rectangle
+    func restoreSelection(_ rect: CGRect) {
+        viewModel.selectionRect = rect
+    }
+
+    /// Make overlay windows pass-through for mouse events (keeps dimming visible)
+    func makePassthrough() {
+        NSCursor.pop()
+        windows.forEach { $0.ignoresMouseEvents = true }
     }
 
     func dismissOverlays() {

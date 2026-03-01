@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import UniformTypeIdentifiers
 
 enum FileSaveService {
@@ -6,16 +7,20 @@ enum FileSaveService {
     static func saveWithDialog(_ image: NSImage) async -> URL? {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png, .jpeg, .bmp]
-        panel.nameFieldStringValue = "Screenshot \(timestamp()).png"
+        panel.nameFieldStringValue = "Screenshot \(timestamp()).\(Defaults[.uploadFormat])"
         panel.canCreateDirectories = true
 
-        if let lastDir = UserDefaults.standard.string(forKey: "lastSaveDirectory") {
+        // Use quick save directory if set, otherwise last used directory
+        let quickDir = Defaults[.quickSaveDirectory]
+        if !quickDir.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: quickDir)
+        } else if let lastDir = Defaults[.lastSaveDirectory] {
             panel.directoryURL = URL(fileURLWithPath: lastDir)
         }
 
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
 
-        UserDefaults.standard.set(url.deletingLastPathComponent().path, forKey: "lastSaveDirectory")
+        Defaults[.lastSaveDirectory] = url.deletingLastPathComponent().path
 
         let format = imageFormat(for: url)
         return save(image, to: url, format: format) ? url : nil
@@ -28,8 +33,7 @@ enum FileSaveService {
 
         var properties: [NSBitmapImageRep.PropertyKey: Any] = [:]
         if format == .jpeg {
-            let quality = UserDefaults.standard.double(forKey: "jpegQuality")
-            properties[.compressionFactor] = quality > 0 ? quality : 0.9
+            properties[.compressionFactor] = Defaults[.jpegQuality]
         }
 
         guard let data = bitmapRep.representation(using: format, properties: properties)

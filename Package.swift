@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LightShotClone",
+    name: "TravisShot",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", .upToNextMinor(from: "1.15.0")),
@@ -11,7 +11,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "LightShotClone",
+            name: "TravisShot",
             dependencies: [
                 "KeyboardShortcuts",
                 .product(name: "LaunchAtLogin", package: "LaunchAtLogin-Modern"),
@@ -22,8 +22,8 @@ let package = Package(
             resources: [.process("Resources/Assets.xcassets")]
         ),
         .testTarget(
-            name: "LightShotCloneTests",
-            dependencies: ["LightShotClone"],
+            name: "TravisShotTests",
+            dependencies: ["TravisShot"],
             path: "LightShotCloneTests"
         ),
     ]

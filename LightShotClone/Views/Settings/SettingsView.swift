@@ -18,6 +18,6 @@ struct SettingsView: View {
                     Label("Formats", systemImage: "doc")
                 }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 480, height: 350)
     }
 }

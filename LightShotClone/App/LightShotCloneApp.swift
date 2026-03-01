@@ -2,11 +2,11 @@ import SwiftUI
 import KeyboardShortcuts
 
 @main
-struct LightShotCloneApp: App {
+struct TravisShotApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("LightShot", systemImage: "camera.viewfinder") {
+        MenuBarExtra("TravisShot", systemImage: "camera.viewfinder") {
             Button("Capture Region") {
                 appDelegate.startRegionCapture()
             }
@@ -14,23 +14,19 @@ struct LightShotCloneApp: App {
             Divider()
 
             Button("Preferences...") {
-                if #available(macOS 14, *) {
-                    NSApp.activate()
-                }
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                appDelegate.openPreferences()
             }
             .keyboardShortcut(",")
 
             Divider()
 
-            Button("Quit LightShot") {
+            Button("Quit TravisShot") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
         }
 
-        Settings {
-            SettingsView()
-        }
+        // Settings window is managed manually by AppDelegate.openPreferences()
+        // to avoid SwiftUI Settings scene not connecting properly in SPM builds.
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import Foundation
 
 struct ImgurResponse: Codable {
@@ -17,20 +18,25 @@ enum ImageUploadError: LocalizedError {
     case imageConversionFailed
     case uploadFailed(String)
     case invalidResponse
+    case noApiKey
 
     var errorDescription: String? {
         switch self {
         case .imageConversionFailed: return "Failed to convert image for upload"
         case .uploadFailed(let msg): return "Upload failed: \(msg)"
         case .invalidResponse: return "Invalid server response"
+        case .noApiKey: return "No Imgur Client-ID configured. Set it in Preferences > Upload."
         }
     }
 }
 
 enum ImageUploadService {
-    private static let imgurClientID = "YOUR_IMGUR_CLIENT_ID"
-
     static func uploadToImgur(_ image: NSImage) async throws -> String {
+        let clientID = Defaults[.imgurClientID].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clientID.isEmpty else {
+            throw ImageUploadError.noApiKey
+        }
+
         guard let tiffData = image.tiffRepresentation,
               let bitmapRep = NSBitmapImageRep(data: tiffData),
               let pngData = bitmapRep.representation(using: .png, properties: [:])
@@ -41,7 +47,7 @@ enum ImageUploadService {
         let boundary = UUID().uuidString
         var request = URLRequest(url: URL(string: "https://api.imgur.com/3/image")!)
         request.httpMethod = "POST"
-        request.setValue("Client-ID \(imgurClientID)", forHTTPHeaderField: "Authorization")
+        request.setValue("Client-ID \(clientID)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()

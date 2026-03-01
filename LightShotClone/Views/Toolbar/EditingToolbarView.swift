@@ -6,7 +6,7 @@ struct EditingToolbarView: View {
     @State private var showColorPicker = false
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             // Drawing tools
             ForEach(AnnotationTool.allCases) { tool in
                 ToolButton(
@@ -27,7 +27,7 @@ struct EditingToolbarView: View {
             }
 
             Divider()
-                .frame(width: 24)
+                .frame(width: 28)
                 .padding(.vertical, 2)
 
             // Undo
@@ -48,11 +48,11 @@ struct EditingToolbarView: View {
                 onClose()
             }
         }
-        .padding(6)
+        .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         )
     }
 }
@@ -63,16 +63,27 @@ struct ToolButton: View {
     let tooltip: String
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 14))
-                .frame(width: 28, height: 28)
-                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(4)
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Color.accentColor.opacity(0.25) :
+                              isHovered ? Color.primary.opacity(0.1) : Color.clear)
+                )
                 .foregroundColor(isSelected ? .accentColor : .primary)
+                .scaleEffect(isHovered && !isSelected ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
+                .animation(.easeInOut(duration: 0.15), value: isSelected)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .help(tooltip)
     }
 }
@@ -81,18 +92,25 @@ struct ColorButton: View {
     let color: Color
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: 4)
                 .fill(color)
-                .frame(width: 20, height: 20)
+                .frame(width: 22, height: 22)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: 4)
                         .stroke(Color.primary.opacity(0.3), lineWidth: 1)
                 )
-                .frame(width: 28, height: 28)
+                .frame(width: 34, height: 34)
+                .scaleEffect(isHovered ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .help("Color")
     }
 }

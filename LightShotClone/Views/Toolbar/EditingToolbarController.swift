@@ -10,8 +10,8 @@ final class EditingToolbarController {
     }
 
     func show(near selectionRect: NSRect, onClose: @escaping () -> Void) {
-        let toolbarWidth: CGFloat = 40
-        let toolbarHeight: CGFloat = 320
+        let toolbarWidth: CGFloat = 50
+        let toolbarHeight: CGFloat = 400
         let margin: CGFloat = 8
 
         var x = selectionRect.maxX + margin

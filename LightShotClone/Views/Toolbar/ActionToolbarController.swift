@@ -10,8 +10,8 @@ final class ActionToolbarController {
               onPrint: @escaping () -> Void,
               onCopy: @escaping () -> Void,
               onSave: @escaping () -> Void) {
-        let toolbarWidth: CGFloat = 200
-        let toolbarHeight: CGFloat = 40
+        let toolbarWidth: CGFloat = 230
+        let toolbarHeight: CGFloat = 50
         let margin: CGFloat = 8
 
         let x = selectionRect.maxX - toolbarWidth

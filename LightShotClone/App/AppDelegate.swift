@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import KeyboardShortcuts
 import ScreenCaptureKit
 import SwiftUI
@@ -9,25 +10,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var actionToolbar: ActionToolbarController?
     private var annotationVM = AnnotationViewModel()
     private var annotationWindow: NSWindow?
+    private var drawingCanvas: DrawingCanvasNSView?
     private var localKeyMonitor: Any?
-    private var scrollMonitor: Any?
+    private var settingsWindow: NSWindow?
 
     private var screenCapture: CGImage?
-    private var currentSelectionRect: CGRect?
+    /// Selection rect in SwiftUI coordinates (top-left origin) - used for image cropping
+    private var selectionRectForCrop: CGRect?
+    /// Selection rect in screen coordinates (bottom-left origin) - used for window positioning
+    private var selectionRectScreen: CGRect?
     private var currentScreen: NSScreen?
+    /// Saved selection position for "Keep selection position" feature
+    private var lastSelectionSwiftUIRect: CGRect?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // LSUIElement=YES in Info.plist handles hiding from Dock.
+        // Do NOT call NSApp.setActivationPolicy(.accessory) — it interferes with
+        // SwiftUI lifecycle and causes the app to terminate when windows close.
         registerHotkeys()
-        checkPermissions()
     }
 
-    // MARK: - Permissions
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
 
-    private func checkPermissions() {
-        if !PermissionManager.hasScreenRecordingPermission {
-            PermissionManager.requestScreenRecordingPermission()
+    // MARK: - Preferences
+
+    func openPreferences() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        if let window = settingsWindow {
+            window.makeKeyAndOrderFront(nil)
+            return
         }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 350),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "TravisShot Settings"
+        window.contentView = NSHostingView(rootView: SettingsView())
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        settingsWindow = window
     }
 
     // MARK: - Global Hotkeys
@@ -50,40 +78,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func startRegionCapture() {
         Task { @MainActor in
-            guard let displays = try? await ScreenCaptureService.availableDisplays(),
-                  let display = displays.first else { return }
-            screenCapture = try? await ScreenCaptureService.captureFullScreen(display: display)
+            do {
+                let displays = try await ScreenCaptureService.availableDisplays()
+                guard let display = displays.first else { return }
+                screenCapture = try await ScreenCaptureService.captureFullScreen(
+                    display: display,
+                    showCursor: Defaults[.captureCursor]
+                )
+            } catch {
+                showPermissionAlert()
+                return
+            }
 
             annotationVM = AnnotationViewModel()
             let overlay = OverlayWindowController()
             overlay.onSelectionComplete = { [weak self] rect, screen in
-                self?.onSelectionComplete(rect: rect, screen: screen)
+                self?.onSelectionComplete(swiftUIRect: rect, screen: screen)
             }
             overlay.onCancel = { [weak self] in
                 self?.dismissAll()
             }
             overlay.showOverlays()
+
+            if Defaults[.keepSelectionPosition], let lastRect = lastSelectionSwiftUIRect {
+                overlay.restoreSelection(lastRect)
+            }
+
             overlayController = overlay
         }
     }
 
     // MARK: - Selection Complete
 
-    private func onSelectionComplete(rect: CGRect, screen: NSScreen) {
-        currentSelectionRect = rect
+    private func onSelectionComplete(swiftUIRect: CGRect, screen: NSScreen) {
         currentScreen = screen
 
-        showAnnotationCanvas(rect: rect, screen: screen)
+        // Save selection position if "Keep selection position" is enabled
+        if Defaults[.keepSelectionPosition] {
+            lastSelectionSwiftUIRect = swiftUIRect
+        }
+
+        // Store SwiftUI rect (top-left origin) for image cropping
+        selectionRectForCrop = swiftUIRect
+
+        // Convert SwiftUI coords (top-left origin) → screen coords (bottom-left origin)
+        let screenRect = CGRect(
+            x: screen.frame.origin.x + swiftUIRect.origin.x,
+            y: screen.frame.origin.y + screen.frame.height - swiftUIRect.origin.y - swiftUIRect.height,
+            width: swiftUIRect.width,
+            height: swiftUIRect.height
+        )
+        selectionRectScreen = screenRect
+
+        // Keep overlays for dimming, but stop intercepting mouse events
+        overlayController?.makePassthrough()
+
+        showAnnotationCanvas(screenRect: screenRect, screen: screen)
 
         let editToolbar = EditingToolbarController(annotationVM: annotationVM)
-        editToolbar.show(near: rect, onClose: { [weak self] in
+        editToolbar.show(near: screenRect, onClose: { [weak self] in
             self?.dismissAll()
         })
         editingToolbar = editToolbar
 
         let actToolbar = ActionToolbarController()
         actToolbar.show(
-            near: rect,
+            near: screenRect,
             onUpload: { [weak self] in self?.uploadScreenshot() },
             onSearchSimilar: { [weak self] in self?.searchSimilarImages() },
             onPrint: { [weak self] in self?.printScreenshot() },
@@ -93,12 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         actionToolbar = actToolbar
 
         installKeyMonitor()
-        installScrollMonitor()
     }
 
-    private func showAnnotationCanvas(rect: CGRect, screen: NSScreen) {
+    private func showAnnotationCanvas(screenRect: CGRect, screen: NSScreen) {
         let window = NonDraggableWindow(
-            contentRect: rect,
+            contentRect: screenRect,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false,
@@ -112,12 +171,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovable = false
         window.isMovableByWindowBackground = false
 
-        let canvasView = AnnotationCanvasView(
+        let canvas = DrawingCanvasNSView(
             viewModel: annotationVM,
-            canvasSize: rect.size
+            frame: NSRect(origin: .zero, size: screenRect.size)
         )
-        window.contentView = NSHostingView(rootView: canvasView)
+        canvas.autoresizingMask = [.width, .height]
+        window.contentView = canvas
+        drawingCanvas = canvas
+
         window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(canvas)
         annotationWindow = window
     }
 
@@ -150,11 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return nil
                 case "z":
                     self.annotationVM.undo()
-                    return nil
-                case "a":
-                    if let screen = self.currentScreen {
-                        self.currentSelectionRect = screen.frame
-                    }
+                    self.drawingCanvas?.forceRedraw()
                     return nil
                 default: break
                 }
@@ -164,32 +223,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func installScrollMonitor() {
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self = self else { return event }
-            if event.scrollingDeltaY != 0 {
-                let delta: CGFloat = event.scrollingDeltaY > 0 ? 1.0 : -1.0
-                self.annotationVM.adjustSize(delta: delta)
-            }
-            return event
-        }
-    }
-
     private func removeKeyMonitor() {
         if let monitor = localKeyMonitor {
             NSEvent.removeMonitor(monitor)
             localKeyMonitor = nil
-        }
-        if let monitor = scrollMonitor {
-            NSEvent.removeMonitor(monitor)
-            scrollMonitor = nil
         }
     }
 
     // MARK: - Actions
 
     private func getFinalImage() -> NSImage? {
-        guard let capture = screenCapture, let rect = currentSelectionRect else { return nil }
+        // Use SwiftUI rect (top-left origin) for cropping - matches CGImage coordinate system
+        guard let capture = screenCapture, let rect = selectionRectForCrop else { return nil }
 
         let scale = currentScreen?.backingScaleFactor ?? 2.0
         let scaledRect = CGRect(
@@ -201,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let cropped = capture.cropping(to: scaledRect) else { return nil }
 
-        let finalCG = annotationVM.renderAnnotations(onto: cropped, selectionRect: rect) ?? cropped
+        let finalCG = annotationVM.renderAnnotations(onto: cropped, selectionRect: rect, scale: scale) ?? cropped
 
         return NSImage(cgImage: finalCG, size: NSSize(width: rect.width, height: rect.height))
     }
@@ -209,6 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func copyToClipboard() {
         guard let image = getFinalImage() else { return }
         ClipboardService.copy(image)
+        showSuccessFeedback("Copied to clipboard")
         dismissAll()
     }
 
@@ -216,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let image = getFinalImage() else { return }
         Task { @MainActor in
             let _ = await FileSaveService.saveWithDialog(image)
+            showSuccessFeedback("Screenshot saved")
             dismissAll()
         }
     }
@@ -226,14 +273,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let link = try await ImageUploadService.uploadToImgur(image)
                 await MainActor.run {
-                    ClipboardService.copyText(link)
+                    if Defaults[.autoCopyLinkAfterUpload] {
+                        ClipboardService.copyText(link)
+                    }
+                    showSuccessFeedback("Screenshot uploaded")
                     dismissAll()
                 }
             } catch {
-                // silently fail for now
-                await MainActor.run { dismissAll() }
+                await MainActor.run {
+                    dismissAll()
+                    showErrorAlert(message: error.localizedDescription)
+                }
             }
         }
+    }
+
+    private func showErrorAlert(message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Upload Error"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func showPermissionAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Screen Recording Permission Required"
+        alert.informativeText = "TravisShot needs screen recording permission to capture screenshots. Please grant access in System Settings."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    private func showSuccessFeedback(_ message: String) {
+        guard Defaults[.showNotifications] else { return }
+        NSSound.beep()
     }
 
     private func searchSimilarImages() {
@@ -256,39 +337,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func captureAndSaveFullScreen() {
         Task { @MainActor in
-            guard let displays = try? await ScreenCaptureService.availableDisplays(),
-                  let display = displays.first,
-                  let capture = try? await ScreenCaptureService.captureFullScreen(display: display) else { return }
-            let image = NSImage(cgImage: capture, size: NSSize(width: capture.width, height: capture.height))
-            let _ = FileSaveService.save(image, to: desktopURL(ext: "png"))
+            do {
+                let displays = try await ScreenCaptureService.availableDisplays()
+                guard let display = displays.first else { return }
+                let capture = try await ScreenCaptureService.captureFullScreen(
+                    display: display,
+                    showCursor: Defaults[.captureCursor]
+                )
+                let image = NSImage(cgImage: capture, size: NSSize(width: capture.width, height: capture.height))
+                let _ = FileSaveService.save(image, to: quickSaveURL(ext: "png"))
+                showSuccessFeedback("Screenshot saved")
+            } catch {
+                showPermissionAlert()
+            }
         }
     }
 
     private func captureAndUploadFullScreen() {
         Task {
-            guard let displays = try? await ScreenCaptureService.availableDisplays(),
-                  let display = displays.first,
-                  let capture = try? await ScreenCaptureService.captureFullScreen(display: display) else { return }
-            let image = NSImage(cgImage: capture, size: NSSize(width: capture.width, height: capture.height))
-            if let link = try? await ImageUploadService.uploadToImgur(image) {
+            do {
+                let displays = try await ScreenCaptureService.availableDisplays()
+                guard let display = displays.first else { return }
+                let capture = try await ScreenCaptureService.captureFullScreen(
+                    display: display,
+                    showCursor: Defaults[.captureCursor]
+                )
+                let image = NSImage(cgImage: capture, size: NSSize(width: capture.width, height: capture.height))
+                let link = try await ImageUploadService.uploadToImgur(image)
                 await MainActor.run {
-                    ClipboardService.copyText(link)
+                    if Defaults[.autoCopyLinkAfterUpload] {
+                        ClipboardService.copyText(link)
+                    }
+                    showSuccessFeedback("Screenshot uploaded")
+                }
+            } catch {
+                await MainActor.run {
+                    showPermissionAlert()
                 }
             }
         }
     }
 
-    private func desktopURL(ext: String) -> URL {
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+    private func quickSaveURL(ext: String) -> URL {
+        let quickDir = Defaults[.quickSaveDirectory]
+        let directory: URL
+        if !quickDir.isEmpty {
+            directory = URL(fileURLWithPath: quickDir)
+        } else {
+            directory = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        }
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return desktop.appendingPathComponent("Screenshot \(df.string(from: Date())).\(ext)")
+        return directory.appendingPathComponent("Screenshot \(df.string(from: Date())).\(ext)")
     }
 
     // MARK: - Dismiss
 
     private func dismissAll() {
         removeKeyMonitor()
+        drawingCanvas?.commitTextField()
+        drawingCanvas = nil
         overlayController?.dismissOverlays()
         overlayController = nil
         editingToolbar?.dismiss()
@@ -298,7 +406,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         annotationWindow?.close()
         annotationWindow = nil
         screenCapture = nil
-        currentSelectionRect = nil
+        selectionRectForCrop = nil
+        selectionRectScreen = nil
         currentScreen = nil
     }
 }

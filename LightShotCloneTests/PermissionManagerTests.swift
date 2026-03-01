@@ -1,5 +1,5 @@
 import XCTest
-@testable import LightShotClone
+@testable import TravisShot
 
 final class PermissionManagerTests: XCTestCase {
     func testScreenRecordingPermissionCheckDoesNotCrash() {
