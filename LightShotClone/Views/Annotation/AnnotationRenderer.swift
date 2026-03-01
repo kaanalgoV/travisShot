@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 enum AnnotationRenderer {
-    /// Draw an annotation into a CGContext (for final image rendering)
-    static func draw(_ annotation: Annotation, in context: CGContext, canvasSize: CGSize) {
+    /// Draw an annotation into a CGContext (for final image rendering).
+    /// `canvasOffset` translates annotations from full-screen coords to crop-relative coords.
+    static func draw(_ annotation: Annotation, in context: CGContext, canvasSize: CGSize, canvasOffset: CGPoint = .zero) {
         let nsColor = NSColor(annotation.color)
         context.setStrokeColor(nsColor.cgColor)
         context.setFillColor(nsColor.cgColor)
@@ -46,7 +47,6 @@ enum AnnotationRenderer {
             ]
             let string = NSAttributedString(string: annotation.text, attributes: attributes)
             let line = CTLineCreateWithAttributedString(string)
-            // Counter-flip text so it renders right-side-up in our flipped context
             context.saveGState()
             context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
             context.textPosition = CGPoint(x: annotation.startPoint.x, y: annotation.startPoint.y + annotation.fontSize)
@@ -60,8 +60,9 @@ enum AnnotationRenderer {
     private static func drawArrow(from start: CGPoint, to end: CGPoint,
                                    lineWidth: CGFloat, in context: CGContext) {
         let angle = atan2(end.y - start.y, end.x - start.x)
-        let arrowLength: CGFloat = max(15, lineWidth * 5)
-        let arrowAngle: CGFloat = .pi / 6
+        // Narrower arrowhead: shorter and tighter angle
+        let arrowLength: CGFloat = max(12, lineWidth * 3.5)
+        let arrowAngle: CGFloat = .pi / 9 // 20° instead of 30°
 
         // Shaft
         context.beginPath()

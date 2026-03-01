@@ -172,7 +172,8 @@ final class AnnotationViewModel: ObservableObject {
         }
     }
 
-    /// Render all annotations onto a CGImage and return the composited result
+    /// Render all annotations onto a CGImage and return the composited result.
+    /// Annotations are in full-screen coordinates; selectionRect.origin is the offset to crop-relative coords.
     func renderAnnotations(onto image: CGImage, selectionRect: CGRect, scale: CGFloat = 2.0) -> CGImage? {
         let pixelWidth = image.width
         let pixelHeight = image.height
@@ -191,6 +192,9 @@ final class AnnotationViewModel: ObservableObject {
 
         context.translateBy(x: 0, y: CGFloat(pixelHeight))
         context.scaleBy(x: scale, y: -scale)
+
+        // Offset: annotations are in full-screen coords, image is cropped to selectionRect
+        context.translateBy(x: -selectionRect.origin.x, y: -selectionRect.origin.y)
 
         for annotation in annotations {
             AnnotationRenderer.draw(annotation, in: context, canvasSize: selectionRect.size)

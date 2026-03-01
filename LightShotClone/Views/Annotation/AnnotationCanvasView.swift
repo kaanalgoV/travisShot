@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 
 /// Pure AppKit drawing canvas. Handles rendering AND mouse input natively.
+/// Now covers the FULL SCREEN so the user can draw anywhere (useful for webinars).
 final class DrawingCanvasNSView: NSView {
     let viewModel: AnnotationViewModel
     private var textField: NSTextField?
@@ -51,7 +52,6 @@ final class DrawingCanvasNSView: NSView {
 
         for (i, annotation) in viewModel.annotations.enumerated() {
             drawAnnotation(annotation, in: ctx)
-            // Draw selection indicator
             if i == viewModel.selectedAnnotationIndex {
                 drawSelectionIndicator(for: annotation, in: ctx)
             }
@@ -117,7 +117,6 @@ final class DrawingCanvasNSView: NSView {
         ctx.setLineDash(phase: 0, lengths: [4, 4])
         ctx.stroke(rect)
 
-        // Draw corner handles
         let handleSize: CGFloat = 6
         ctx.setFillColor(NSColor.white.cgColor)
         ctx.setStrokeColor(NSColor.systemBlue.cgColor)
@@ -145,8 +144,9 @@ final class DrawingCanvasNSView: NSView {
     private func drawArrow(from start: CGPoint, to end: CGPoint,
                            lineWidth: CGFloat, in ctx: CGContext) {
         let angle = atan2(end.y - start.y, end.x - start.x)
-        let arrowLength: CGFloat = max(15, lineWidth * 5)
-        let arrowAngle: CGFloat = .pi / 6
+        // Narrower arrowhead: smaller length and tighter angle
+        let arrowLength: CGFloat = max(12, lineWidth * 3.5)
+        let arrowAngle: CGFloat = .pi / 9 // 20° instead of 30°
 
         ctx.beginPath()
         ctx.move(to: start)
@@ -179,7 +179,6 @@ final class DrawingCanvasNSView: NSView {
         // Select tool handling
         if viewModel.selectedTool == .select {
             if event.clickCount == 2 {
-                // Double-click: edit text annotation
                 if let idx = viewModel.hitTestAnnotation(at: point),
                    viewModel.annotations[idx].tool == .text {
                     openTextEditorForAnnotation(at: idx)
@@ -214,7 +213,6 @@ final class DrawingCanvasNSView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
-        // Handle select tool drag
         if viewModel.selectedTool == .select && isDraggingSelection {
             if !didPushUndoForDrag {
                 viewModel.undoStack.append(viewModel.annotations)
@@ -248,10 +246,9 @@ final class DrawingCanvasNSView: NSView {
     // MARK: - Keyboard (Delete selected)
 
     override func keyDown(with event: NSEvent) {
-        // Delete/Backspace removes selected annotation
         if viewModel.selectedTool == .select,
            viewModel.selectedAnnotationIndex != nil,
-           event.keyCode == 51 || event.keyCode == 117 { // backspace or delete
+           event.keyCode == 51 || event.keyCode == 117 {
             viewModel.deleteSelectedAnnotation()
             needsDisplay = true
             return
@@ -359,7 +356,6 @@ final class DrawingCanvasNSView: NSView {
         ))
         tf.isEditable = true
         tf.isBordered = false
-        tf.drawsBackground = false
         tf.font = NSFont.systemFont(ofSize: viewModel.currentFontSize)
         tf.textColor = NSColor(viewModel.currentColor)
         tf.focusRingType = .none
@@ -368,6 +364,15 @@ final class DrawingCanvasNSView: NSView {
         tf.cell?.isScrollable = true
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
+
+        // Transparent background with subtle white border
+        tf.drawsBackground = true
+        tf.backgroundColor = NSColor(white: 1.0, alpha: 0.08)
+        tf.wantsLayer = true
+        tf.layer?.borderColor = NSColor(white: 1.0, alpha: 0.4).cgColor
+        tf.layer?.borderWidth = 1.0
+        tf.layer?.cornerRadius = 3.0
+
         addSubview(tf)
         tf.becomeFirstResponder()
         textField = tf
@@ -378,16 +383,14 @@ final class DrawingCanvasNSView: NSView {
         let annotation = viewModel.annotations[index]
         guard annotation.tool == .text else { return }
 
-        // Remove the annotation from the list (we'll re-add on commit)
         viewModel.undoStack.append(viewModel.annotations)
         viewModel.annotations.remove(at: index)
         viewModel.selectedAnnotationIndex = nil
 
-        // Set the ViewModel state so commitTextField uses the right color/size
         viewModel.currentColor = annotation.color
         viewModel.currentFontSize = annotation.fontSize
+        viewModel.selectedTool = .text
 
-        // Create text field at the annotation's position with its content
         let font = NSFont.systemFont(ofSize: annotation.fontSize)
         let attrs: [NSAttributedString.Key: Any] = [.font: font]
         let textSize = (annotation.text as NSString).size(withAttributes: attrs)
@@ -401,7 +404,6 @@ final class DrawingCanvasNSView: NSView {
         ))
         tf.isEditable = true
         tf.isBordered = false
-        tf.drawsBackground = false
         tf.font = font
         tf.textColor = NSColor(annotation.color)
         tf.focusRingType = .none
@@ -410,9 +412,17 @@ final class DrawingCanvasNSView: NSView {
         tf.cell?.isScrollable = true
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
+
+        // Transparent background with subtle white border
+        tf.drawsBackground = true
+        tf.backgroundColor = NSColor(white: 1.0, alpha: 0.08)
+        tf.wantsLayer = true
+        tf.layer?.borderColor = NSColor(white: 1.0, alpha: 0.4).cgColor
+        tf.layer?.borderWidth = 1.0
+        tf.layer?.cornerRadius = 3.0
+
         addSubview(tf)
         tf.becomeFirstResponder()
-        // Select all text for easy replacement
         tf.currentEditor()?.selectAll(nil)
         textField = tf
         needsDisplay = true
@@ -441,6 +451,7 @@ final class DrawingCanvasNSView: NSView {
         tf.removeFromSuperview()
         textField = nil
         window?.makeFirstResponder(self)
+        // Tool stays on .text — user can keep placing text without re-selecting the tool
         needsDisplay = true
     }
 }

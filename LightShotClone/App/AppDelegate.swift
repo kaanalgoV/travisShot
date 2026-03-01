@@ -206,8 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAnnotationCanvas(screenRect: CGRect, screen: NSScreen) {
+        // Use full screen so the user can draw anywhere (webinar mode)
+        let fullScreenRect = screen.frame
+
         let window = NonDraggableWindow(
-            contentRect: screenRect,
+            contentRect: fullScreenRect,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false,
@@ -224,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let canvas = DrawingCanvasNSView(
             viewModel: annotationVM,
-            frame: NSRect(origin: .zero, size: screenRect.size)
+            frame: NSRect(origin: .zero, size: fullScreenRect.size)
         )
         canvas.autoresizingMask = [.width, .height]
         window.contentView = canvas
