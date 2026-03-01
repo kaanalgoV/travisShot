@@ -267,7 +267,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // No modifier: tool shortcuts (configurable)
-            if !cmd, let char = char {
+            // IMPORTANT: Skip when text field is active so typed characters reach the text field
+            if !cmd, let char = char, self.drawingCanvas?.isTextFieldActive != true {
                 self.debugLog("Key pressed: '\(char)' (no cmd)")
                 if char == Defaults[.shortcutSelect] { self.annotationVM.selectTool(.select); return nil }
                 if char == Defaults[.shortcutPen] { self.annotationVM.selectTool(.pen); return nil }

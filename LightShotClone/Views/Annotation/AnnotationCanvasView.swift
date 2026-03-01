@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Pure AppKit drawing canvas. Handles rendering AND mouse input natively.
-/// Now covers the FULL SCREEN so the user can draw anywhere (useful for webinars).
+/// Covers the FULL SCREEN so the user can draw anywhere (useful for webinars).
 final class DrawingCanvasNSView: NSView {
     let viewModel: AnnotationViewModel
     private var textField: NSTextField?
@@ -11,10 +11,20 @@ final class DrawingCanvasNSView: NSView {
     private var sizeIndicatorPanel: NSPanel?
     private var sizeIndicatorTimer: Timer?
 
+    /// True when user is typing into an inline text field — key monitor must ignore tool shortcuts
+    var isTextFieldActive: Bool { textField != nil }
+
     /// Drag state for the select tool
     private var isDraggingSelection = false
     private var dragStartPoint: CGPoint = .zero
     private var didPushUndoForDrag = false
+
+    /// Drag state for moving text with the text tool
+    private var isDraggingText = false
+    private var draggingTextIndex: Int? = nil
+
+    /// Tracking area for cursor changes
+    private var cursorTrackingArea: NSTrackingArea?
 
     init(viewModel: AnnotationViewModel, frame: NSRect) {
         self.viewModel = viewModel
@@ -41,6 +51,59 @@ final class DrawingCanvasNSView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.makeFirstResponder(self)
+    }
+
+    // MARK: - Tracking Area (for cursor changes)
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = cursorTrackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+
+        if viewModel.selectedTool == .text {
+            // Show move cursor when hovering over existing text annotation
+            if let _ = textAnnotationAtPoint(point) {
+                NSCursor.openHand.set()
+                return
+            }
+            NSCursor.iBeam.set()
+            return
+        }
+
+        if viewModel.selectedTool == .select {
+            if let _ = viewModel.hitTestAnnotation(at: point) {
+                NSCursor.openHand.set()
+                return
+            }
+            NSCursor.arrow.set()
+            return
+        }
+
+        NSCursor.crosshair.set()
+    }
+
+    /// Find the topmost text annotation at a given point
+    private func textAnnotationAtPoint(_ point: CGPoint) -> Int? {
+        for i in viewModel.annotations.indices.reversed() {
+            let ann = viewModel.annotations[i]
+            if ann.tool == .text && ann.hitTest(point: point) {
+                return i
+            }
+        }
+        return nil
     }
 
     // MARK: - Drawing
@@ -144,9 +207,8 @@ final class DrawingCanvasNSView: NSView {
     private func drawArrow(from start: CGPoint, to end: CGPoint,
                            lineWidth: CGFloat, in ctx: CGContext) {
         let angle = atan2(end.y - start.y, end.x - start.x)
-        // Narrower arrowhead: smaller length and tighter angle
         let arrowLength: CGFloat = max(12, lineWidth * 3.5)
-        let arrowAngle: CGFloat = .pi / 9 // 20° instead of 30°
+        let arrowAngle: CGFloat = .pi / 9
 
         ctx.beginPath()
         ctx.move(to: start)
@@ -172,11 +234,39 @@ final class DrawingCanvasNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeKeyAndOrderFront(nil)
-        window?.makeFirstResponder(self)
 
         let point = convert(event.locationInWindow, from: nil)
 
-        // Select tool handling
+        // --- Text tool: move existing text OR create new ---
+        if viewModel.selectedTool == .text {
+            // Double-click on text → edit it
+            if event.clickCount == 2, let idx = textAnnotationAtPoint(point) {
+                openTextEditorForAnnotation(at: idx)
+                return
+            }
+
+            // Single click on existing text → start dragging to move
+            if let idx = textAnnotationAtPoint(point) {
+                // Commit any active text field first
+                commitTextField()
+                window?.makeFirstResponder(self)
+                isDraggingText = true
+                draggingTextIndex = idx
+                dragStartPoint = point
+                didPushUndoForDrag = false
+                NSCursor.closedHand.set()
+                needsDisplay = true
+                return
+            }
+
+            // Click on empty space → new text field
+            showTextField(at: point)
+            return
+        }
+
+        // --- Select tool ---
+        window?.makeFirstResponder(self)
+
         if viewModel.selectedTool == .select {
             if event.clickCount == 2 {
                 if let idx = viewModel.hitTestAnnotation(at: point),
@@ -191,6 +281,7 @@ final class DrawingCanvasNSView: NSView {
                 isDraggingSelection = true
                 dragStartPoint = point
                 didPushUndoForDrag = false
+                NSCursor.closedHand.set()
             } else {
                 viewModel.selectAnnotation(at: nil)
                 isDraggingSelection = false
@@ -199,13 +290,8 @@ final class DrawingCanvasNSView: NSView {
             return
         }
 
+        // --- All other tools ---
         guard viewModel.selectedTool != nil else { return }
-
-        if viewModel.selectedTool == .text {
-            showTextField(at: point)
-            return
-        }
-
         viewModel.beginStroke(at: point)
         needsDisplay = true
     }
@@ -213,6 +299,20 @@ final class DrawingCanvasNSView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
+        // Dragging text with text tool
+        if isDraggingText, let idx = draggingTextIndex, viewModel.annotations.indices.contains(idx) {
+            if !didPushUndoForDrag {
+                viewModel.undoStack.append(viewModel.annotations)
+                didPushUndoForDrag = true
+            }
+            let delta = CGSize(width: point.x - dragStartPoint.x, height: point.y - dragStartPoint.y)
+            viewModel.annotations[idx].translate(by: delta)
+            dragStartPoint = point
+            needsDisplay = true
+            return
+        }
+
+        // Dragging with select tool
         if viewModel.selectedTool == .select && isDraggingSelection {
             if !didPushUndoForDrag {
                 viewModel.undoStack.append(viewModel.annotations)
@@ -231,8 +331,17 @@ final class DrawingCanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isDraggingText {
+            isDraggingText = false
+            draggingTextIndex = nil
+            NSCursor.openHand.set()
+            needsDisplay = true
+            return
+        }
+
         if viewModel.selectedTool == .select && isDraggingSelection {
             isDraggingSelection = false
+            NSCursor.openHand.set()
             needsDisplay = true
             return
         }
@@ -344,6 +453,15 @@ final class DrawingCanvasNSView: NSView {
 
     // MARK: - Text Input
 
+    private func configureTextFieldStyle(_ tf: NSTextField) {
+        tf.drawsBackground = true
+        tf.backgroundColor = NSColor(white: 1.0, alpha: 0.05)
+        tf.wantsLayer = true
+        tf.layer?.borderColor = NSColor(white: 1.0, alpha: 0.15).cgColor
+        tf.layer?.borderWidth = 0.5
+        tf.layer?.cornerRadius = 2.0
+    }
+
     private func showTextField(at point: CGPoint) {
         commitTextField()
 
@@ -364,14 +482,7 @@ final class DrawingCanvasNSView: NSView {
         tf.cell?.isScrollable = true
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
-
-        // Transparent background with subtle white border
-        tf.drawsBackground = true
-        tf.backgroundColor = NSColor(white: 1.0, alpha: 0.08)
-        tf.wantsLayer = true
-        tf.layer?.borderColor = NSColor(white: 1.0, alpha: 0.4).cgColor
-        tf.layer?.borderWidth = 1.0
-        tf.layer?.cornerRadius = 3.0
+        configureTextFieldStyle(tf)
 
         addSubview(tf)
         tf.becomeFirstResponder()
@@ -412,14 +523,7 @@ final class DrawingCanvasNSView: NSView {
         tf.cell?.isScrollable = true
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
-
-        // Transparent background with subtle white border
-        tf.drawsBackground = true
-        tf.backgroundColor = NSColor(white: 1.0, alpha: 0.08)
-        tf.wantsLayer = true
-        tf.layer?.borderColor = NSColor(white: 1.0, alpha: 0.4).cgColor
-        tf.layer?.borderWidth = 1.0
-        tf.layer?.cornerRadius = 3.0
+        configureTextFieldStyle(tf)
 
         addSubview(tf)
         tf.becomeFirstResponder()
@@ -451,7 +555,6 @@ final class DrawingCanvasNSView: NSView {
         tf.removeFromSuperview()
         textField = nil
         window?.makeFirstResponder(self)
-        // Tool stays on .text — user can keep placing text without re-selecting the tool
         needsDisplay = true
     }
 }
