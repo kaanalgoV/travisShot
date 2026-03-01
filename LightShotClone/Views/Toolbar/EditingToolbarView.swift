@@ -1,7 +1,10 @@
+import Defaults
 import SwiftUI
 
 struct EditingToolbarView: View {
     @ObservedObject var annotationVM: AnnotationViewModel
+    var isFrozen: Bool
+    var onToggleFreeze: () -> Void
     var onClose: () -> Void
     @State private var showColorPicker = false
 
@@ -12,7 +15,7 @@ struct EditingToolbarView: View {
                 ToolButton(
                     systemImage: tool.systemImage,
                     isSelected: annotationVM.selectedTool == tool,
-                    tooltip: tool.displayName
+                    tooltip: "\(tool.displayName) (\(shortcutForTool(tool).uppercased()))"
                 ) {
                     annotationVM.selectTool(tool)
                 }
@@ -30,11 +33,20 @@ struct EditingToolbarView: View {
                 .frame(width: 28)
                 .padding(.vertical, 2)
 
+            // Freeze / Unfreeze toggle
+            ToolButton(
+                systemImage: "snowflake",
+                isSelected: isFrozen,
+                tooltip: isFrozen ? "Unfreeze (\(Defaults[.shortcutFreeze].uppercased()))" : "Freeze (\(Defaults[.shortcutFreeze].uppercased()))"
+            ) {
+                onToggleFreeze()
+            }
+
             // Undo
             ToolButton(
                 systemImage: "arrow.uturn.backward",
                 isSelected: false,
-                tooltip: "Undo (Cmd+Z)"
+                tooltip: "Undo (Cmd+\(Defaults[.shortcutUndo].uppercased()))"
             ) {
                 annotationVM.undo()
             }
@@ -54,6 +66,18 @@ struct EditingToolbarView: View {
                 .fill(Color(nsColor: .windowBackgroundColor))
                 .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         )
+    }
+
+    private func shortcutForTool(_ tool: AnnotationTool) -> String {
+        switch tool {
+        case .select: return Defaults[.shortcutSelect]
+        case .pen: return Defaults[.shortcutPen]
+        case .line: return Defaults[.shortcutLine]
+        case .arrow: return Defaults[.shortcutArrow]
+        case .rectangle: return Defaults[.shortcutRectangle]
+        case .text: return Defaults[.shortcutText]
+        case .marker: return Defaults[.shortcutMarker]
+        }
     }
 }
 
@@ -84,7 +108,7 @@ struct ToolButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .help(tooltip)
+        .customTooltip(tooltip, edge: .minX)
     }
 }
 
@@ -111,6 +135,6 @@ struct ColorButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .help("Color")
+        .customTooltip("Color", edge: .minX)
     }
 }

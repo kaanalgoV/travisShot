@@ -7,13 +7,24 @@ final class DrawingCanvasNSView: NSView {
     let viewModel: AnnotationViewModel
     private var textField: NSTextField?
     private var cancellables = Set<AnyCancellable>()
+    private var sizeIndicatorPanel: NSPanel?
+    private var sizeIndicatorTimer: Timer?
+
+    /// Drag state for the select tool
+    private var isDraggingSelection = false
+    private var dragStartPoint: CGPoint = .zero
+    private var didPushUndoForDrag = false
 
     init(viewModel: AnnotationViewModel, frame: NSRect) {
         self.viewModel = viewModel
         super.init(frame: frame)
 
-        // Observe annotation changes from external sources (e.g. undo via toolbar)
         viewModel.$annotations
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.needsDisplay = true }
+            .store(in: &cancellables)
+
+        viewModel.$selectedAnnotationIndex
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
             .store(in: &cancellables)
@@ -24,8 +35,6 @@ final class DrawingCanvasNSView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
-    /// Accept the very first mouse click even when the window isn't key.
-    /// Without this, clicking after using the toolbar only re-focuses the window.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {
@@ -37,17 +46,17 @@ final class DrawingCanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        // Draw a nearly-invisible background so macOS delivers mouse events to this window.
-        // Fully transparent borderless windows pass mouse events through to windows below.
         ctx.setFillColor(NSColor(white: 0, alpha: 0.01).cgColor)
         ctx.fill(bounds)
 
-        // Draw completed annotations
-        for annotation in viewModel.annotations {
+        for (i, annotation) in viewModel.annotations.enumerated() {
             drawAnnotation(annotation, in: ctx)
+            // Draw selection indicator
+            if i == viewModel.selectedAnnotationIndex {
+                drawSelectionIndicator(for: annotation, in: ctx)
+            }
         }
 
-        // Draw in-progress annotation
         if let current = viewModel.currentAnnotation {
             drawAnnotation(current, in: ctx)
         }
@@ -62,6 +71,9 @@ final class DrawingCanvasNSView: NSView {
         ctx.setLineJoin(.round)
 
         switch annotation.tool {
+        case .select:
+            break
+
         case .pen, .marker:
             guard annotation.freehandPoints.count > 1 else { return }
             ctx.beginPath()
@@ -95,6 +107,41 @@ final class DrawingCanvasNSView: NSView {
         }
     }
 
+    private func drawSelectionIndicator(for annotation: Annotation, in ctx: CGContext) {
+        let rect = annotation.selectionRect().insetBy(dx: -4, dy: -4)
+        guard rect.width > 0 && rect.height > 0 else { return }
+
+        ctx.saveGState()
+        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.setLineDash(phase: 0, lengths: [4, 4])
+        ctx.stroke(rect)
+
+        // Draw corner handles
+        let handleSize: CGFloat = 6
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
+        ctx.setLineWidth(1)
+        ctx.setLineDash(phase: 0, lengths: [])
+        let corners = [
+            CGPoint(x: rect.minX, y: rect.minY),
+            CGPoint(x: rect.maxX, y: rect.minY),
+            CGPoint(x: rect.minX, y: rect.maxY),
+            CGPoint(x: rect.maxX, y: rect.maxY),
+        ]
+        for corner in corners {
+            let handleRect = CGRect(
+                x: corner.x - handleSize / 2,
+                y: corner.y - handleSize / 2,
+                width: handleSize,
+                height: handleSize
+            )
+            ctx.fillEllipse(in: handleRect)
+            ctx.strokeEllipse(in: handleRect)
+        }
+        ctx.restoreGState()
+    }
+
     private func drawArrow(from start: CGPoint, to end: CGPoint,
                            lineWidth: CGFloat, in ctx: CGContext) {
         let angle = atan2(end.y - start.y, end.x - start.x)
@@ -124,12 +171,36 @@ final class DrawingCanvasNSView: NSView {
     // MARK: - Mouse Events
 
     override func mouseDown(with event: NSEvent) {
-        // Always reclaim key window + first responder on click
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(self)
 
-        guard viewModel.selectedTool != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
+
+        // Select tool handling
+        if viewModel.selectedTool == .select {
+            if event.clickCount == 2 {
+                // Double-click: edit text annotation
+                if let idx = viewModel.hitTestAnnotation(at: point),
+                   viewModel.annotations[idx].tool == .text {
+                    openTextEditorForAnnotation(at: idx)
+                    return
+                }
+            }
+
+            if let idx = viewModel.hitTestAnnotation(at: point) {
+                viewModel.selectAnnotation(at: idx)
+                isDraggingSelection = true
+                dragStartPoint = point
+                didPushUndoForDrag = false
+            } else {
+                viewModel.selectAnnotation(at: nil)
+                isDraggingSelection = false
+            }
+            needsDisplay = true
+            return
+        }
+
+        guard viewModel.selectedTool != nil else { return }
 
         if viewModel.selectedTool == .text {
             showTextField(at: point)
@@ -141,17 +212,51 @@ final class DrawingCanvasNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard viewModel.selectedTool != nil, viewModel.selectedTool != .text else { return }
         let point = convert(event.locationInWindow, from: nil)
+
+        // Handle select tool drag
+        if viewModel.selectedTool == .select && isDraggingSelection {
+            if !didPushUndoForDrag {
+                viewModel.undoStack.append(viewModel.annotations)
+                didPushUndoForDrag = true
+            }
+            let delta = CGSize(width: point.x - dragStartPoint.x, height: point.y - dragStartPoint.y)
+            viewModel.moveSelectedAnnotation(by: delta)
+            dragStartPoint = point
+            needsDisplay = true
+            return
+        }
+
+        guard viewModel.selectedTool != nil, viewModel.selectedTool != .text else { return }
         viewModel.continueStroke(to: point)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        if viewModel.selectedTool == .select && isDraggingSelection {
+            isDraggingSelection = false
+            needsDisplay = true
+            return
+        }
+
         guard viewModel.selectedTool != nil, viewModel.selectedTool != .text else { return }
         let point = convert(event.locationInWindow, from: nil)
         viewModel.endStroke(at: point)
         needsDisplay = true
+    }
+
+    // MARK: - Keyboard (Delete selected)
+
+    override func keyDown(with event: NSEvent) {
+        // Delete/Backspace removes selected annotation
+        if viewModel.selectedTool == .select,
+           viewModel.selectedAnnotationIndex != nil,
+           event.keyCode == 51 || event.keyCode == 117 { // backspace or delete
+            viewModel.deleteSelectedAnnotation()
+            needsDisplay = true
+            return
+        }
+        super.keyDown(with: event)
     }
 
     // MARK: - Scroll Wheel
@@ -165,9 +270,77 @@ final class DrawingCanvasNSView: NSView {
             delta = event.scrollingDeltaY > 0 ? 1.0 : -1.0
         }
         viewModel.adjustSize(delta: delta)
+        showSizeIndicator(at: convert(event.locationInWindow, from: nil))
     }
 
-    /// Force redraw (called externally when tool changes via toolbar)
+    private func showSizeIndicator(at localPoint: CGPoint) {
+        sizeIndicatorTimer?.invalidate()
+        sizeIndicatorPanel?.close()
+        sizeIndicatorPanel = nil
+
+        let isText = viewModel.selectedTool == .text || viewModel.isEditingText
+        let value = isText ? viewModel.currentFontSize : viewModel.currentLineWidth
+        let label = isText ? "Font: \(Int(value))pt" : "Width: \(String(format: "%.1f", value))px"
+
+        let previewDiameter = isText ? min(value, 40) : min(max(value, 4), 40)
+
+        let panelWidth: CGFloat = 80
+        let panelHeight: CGFloat = previewDiameter + 32
+
+        guard let window = self.window else { return }
+        let windowPoint = convert(localPoint, to: nil)
+        let screenPoint = window.convertPoint(toScreen: windowPoint)
+
+        let panelX = screenPoint.x - panelWidth / 2
+        let panelY = screenPoint.y + 16
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = NSWindow.Level(Int(CGWindowLevelForKey(.screenSaverWindow)) + 3)
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.isReleasedWhenClosed = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(white: 0, alpha: 0.75).cgColor
+        container.layer?.cornerRadius = 8
+
+        let dotSize = previewDiameter
+        let dot = NSView(frame: NSRect(
+            x: (panelWidth - dotSize) / 2,
+            y: 20,
+            width: dotSize,
+            height: dotSize
+        ))
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.white.cgColor
+        dot.layer?.cornerRadius = dotSize / 2
+        container.addSubview(dot)
+
+        let textLabel = NSTextField(labelWithString: label)
+        textLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        textLabel.textColor = .white
+        textLabel.alignment = .center
+        textLabel.frame = NSRect(x: 0, y: 2, width: panelWidth, height: 14)
+        container.addSubview(textLabel)
+
+        panel.contentView = container
+        panel.orderFront(nil)
+        sizeIndicatorPanel = panel
+
+        sizeIndicatorTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+            self?.sizeIndicatorPanel?.close()
+            self?.sizeIndicatorPanel = nil
+        }
+    }
+
     func forceRedraw() {
         needsDisplay = true
     }
@@ -198,6 +371,51 @@ final class DrawingCanvasNSView: NSView {
         addSubview(tf)
         tf.becomeFirstResponder()
         textField = tf
+    }
+
+    /// Open a text editor on an existing text annotation (for re-editing)
+    private func openTextEditorForAnnotation(at index: Int) {
+        let annotation = viewModel.annotations[index]
+        guard annotation.tool == .text else { return }
+
+        // Remove the annotation from the list (we'll re-add on commit)
+        viewModel.undoStack.append(viewModel.annotations)
+        viewModel.annotations.remove(at: index)
+        viewModel.selectedAnnotationIndex = nil
+
+        // Set the ViewModel state so commitTextField uses the right color/size
+        viewModel.currentColor = annotation.color
+        viewModel.currentFontSize = annotation.fontSize
+
+        // Create text field at the annotation's position with its content
+        let font = NSFont.systemFont(ofSize: annotation.fontSize)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let textSize = (annotation.text as NSString).size(withAttributes: attrs)
+
+        let maxWidth = bounds.width - annotation.startPoint.x - 10
+        let tf = NSTextField(frame: NSRect(
+            x: annotation.startPoint.x,
+            y: annotation.startPoint.y,
+            width: max(min(300, max(textSize.width + 20, 100)), maxWidth > 100 ? 100 : maxWidth),
+            height: annotation.fontSize + 8
+        ))
+        tf.isEditable = true
+        tf.isBordered = false
+        tf.drawsBackground = false
+        tf.font = font
+        tf.textColor = NSColor(annotation.color)
+        tf.focusRingType = .none
+        tf.delegate = self
+        tf.stringValue = annotation.text
+        tf.cell?.isScrollable = true
+        tf.cell?.wraps = false
+        tf.cell?.lineBreakMode = .byClipping
+        addSubview(tf)
+        tf.becomeFirstResponder()
+        // Select all text for easy replacement
+        tf.currentEditor()?.selectAll(nil)
+        textField = tf
+        needsDisplay = true
     }
 
     func commitTextField() {

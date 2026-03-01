@@ -11,6 +11,9 @@ final class AnnotationViewModel: ObservableObject {
     @Published var textEditPosition: CGPoint = .zero
     @Published var textEditContent: String = ""
 
+    /// Index of the currently selected annotation (for select tool)
+    @Published var selectedAnnotationIndex: Int? = nil
+
     var undoStack: [[Annotation]] = []
     private let maxUndoSteps = 50
 
@@ -30,11 +33,46 @@ final class AnnotationViewModel: ObservableObject {
 
     func selectTool(_ tool: AnnotationTool) {
         if selectedTool == tool {
-            selectedTool = nil // Toggle off
+            selectedTool = nil
         } else {
             selectedTool = tool
         }
+        if tool != .select {
+            selectedAnnotationIndex = nil
+        }
         commitTextIfNeeded()
+    }
+
+    // MARK: - Selection
+
+    /// Hit-test annotations in reverse order (topmost first) and return the index
+    func hitTestAnnotation(at point: CGPoint) -> Int? {
+        for i in annotations.indices.reversed() {
+            if annotations[i].hitTest(point: point) {
+                return i
+            }
+        }
+        return nil
+    }
+
+    func selectAnnotation(at index: Int?) {
+        selectedAnnotationIndex = index
+    }
+
+    func moveSelectedAnnotation(by delta: CGSize) {
+        guard let idx = selectedAnnotationIndex, annotations.indices.contains(idx) else { return }
+        annotations[idx].translate(by: delta)
+    }
+
+    func commitMove() {
+        // Push undo before the move series started — handled by beginMove
+    }
+
+    func deleteSelectedAnnotation() {
+        guard let idx = selectedAnnotationIndex, annotations.indices.contains(idx) else { return }
+        pushUndo()
+        annotations.remove(at: idx)
+        selectedAnnotationIndex = nil
     }
 
     // MARK: - Drawing
@@ -130,6 +168,7 @@ final class AnnotationViewModel: ObservableObject {
     func undo() {
         if let previous = undoStack.popLast() {
             annotations = previous
+            selectedAnnotationIndex = nil
         }
     }
 
@@ -148,14 +187,11 @@ final class AnnotationViewModel: ObservableObject {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        // Draw the base image at full pixel resolution
         context.draw(image, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
 
-        // Scale and flip for annotations (SwiftUI uses top-left origin, CGContext uses bottom-left)
         context.translateBy(x: 0, y: CGFloat(pixelHeight))
         context.scaleBy(x: scale, y: -scale)
 
-        // Draw annotations in logical (1x) coordinates
         for annotation in annotations {
             AnnotationRenderer.draw(annotation, in: context, canvasSize: selectionRect.size)
         }

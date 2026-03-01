@@ -1,6 +1,7 @@
 import Foundation
 
 enum AnnotationTool: String, CaseIterable, Identifiable {
+    case select
     case pen
     case line
     case arrow
@@ -12,6 +13,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .select: return "Select"
         case .pen: return "Pen"
         case .line: return "Line"
         case .arrow: return "Arrow"
@@ -23,6 +25,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .select: return "cursorarrow"
         case .pen: return "pencil.tip"
         case .line: return "line.diagonal"
         case .arrow: return "arrow.up.right"

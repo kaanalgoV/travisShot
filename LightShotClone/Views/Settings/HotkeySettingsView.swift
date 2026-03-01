@@ -23,6 +23,7 @@ struct HotkeySettingsView: View {
                         GridItem(.flexible(), spacing: 12),
                         GridItem(.flexible(), spacing: 12),
                     ], alignment: .leading, spacing: 8) {
+                        ShortcutField(label: "Select", key: .shortcutSelect)
                         ShortcutField(label: "Pen", key: .shortcutPen)
                         ShortcutField(label: "Line", key: .shortcutLine)
                         ShortcutField(label: "Arrow", key: .shortcutArrow)

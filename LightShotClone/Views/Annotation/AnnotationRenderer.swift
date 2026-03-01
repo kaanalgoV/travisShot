@@ -12,6 +12,9 @@ enum AnnotationRenderer {
         context.setLineJoin(.round)
 
         switch annotation.tool {
+        case .select:
+            break
+
         case .pen, .marker:
             guard annotation.freehandPoints.count > 1 else { return }
             context.beginPath()

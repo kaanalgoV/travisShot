@@ -256,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // No modifier: tool shortcuts (configurable)
             if !cmd, let char = char {
                 self.debugLog("Key pressed: '\(char)' (no cmd)")
+                if char == Defaults[.shortcutSelect] { self.annotationVM.selectTool(.select); return nil }
                 if char == Defaults[.shortcutPen] { self.annotationVM.selectTool(.pen); return nil }
                 if char == Defaults[.shortcutLine] { self.annotationVM.selectTool(.line); return nil }
                 if char == Defaults[.shortcutArrow] { self.annotationVM.selectTool(.arrow); return nil }

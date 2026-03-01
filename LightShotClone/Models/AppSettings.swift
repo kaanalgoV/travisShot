@@ -19,4 +19,23 @@ extension Defaults.Keys {
     static let defaultAnnotationColor = Key<String>("defaultAnnotationColor", default: "#FF0000")
     static let launchAtLogin = Key<Bool>("launchAtLogin", default: false)
     static let imgurClientID = Key<String>("imgurClientID", default: "")
+
+    // Tool shortcuts (single character, no modifier — active during capture)
+    static let shortcutSelect = Key<String>("shortcutSelect", default: "v")
+    static let shortcutPen = Key<String>("shortcutPen", default: "p")
+    static let shortcutLine = Key<String>("shortcutLine", default: "l")
+    static let shortcutArrow = Key<String>("shortcutArrow", default: "a")
+    static let shortcutRectangle = Key<String>("shortcutRectangle", default: "r")
+    static let shortcutText = Key<String>("shortcutText", default: "t")
+    static let shortcutMarker = Key<String>("shortcutMarker", default: "m")
+
+    // Toggle shortcuts (single character, no modifier — active during capture)
+    static let shortcutFreeze = Key<String>("shortcutFreeze", default: "f")
+
+    // Action shortcuts (character used with Cmd modifier — active during capture)
+    static let shortcutCopy = Key<String>("shortcutCopy", default: "c")
+    static let shortcutSave = Key<String>("shortcutSave", default: "s")
+    static let shortcutUpload = Key<String>("shortcutUpload", default: "d")
+    static let shortcutPrint = Key<String>("shortcutPrint", default: "p")
+    static let shortcutUndo = Key<String>("shortcutUndo", default: "z")
 }
