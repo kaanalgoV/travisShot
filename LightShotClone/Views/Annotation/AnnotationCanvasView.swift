@@ -465,11 +465,11 @@ final class DrawingCanvasNSView: NSView {
     private func showTextField(at point: CGPoint) {
         commitTextField()
 
-        let maxWidth = bounds.width - point.x - 10
+        let minWidth: CGFloat = 20
         let tf = NSTextField(frame: NSRect(
             x: point.x,
             y: point.y,
-            width: min(300, max(100, maxWidth)),
+            width: minWidth,
             height: viewModel.currentFontSize + 8
         ))
         tf.isEditable = true
@@ -479,7 +479,7 @@ final class DrawingCanvasNSView: NSView {
         tf.focusRingType = .none
         tf.delegate = self
         tf.stringValue = ""
-        tf.cell?.isScrollable = true
+        tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
         configureTextFieldStyle(tf)
@@ -503,14 +503,11 @@ final class DrawingCanvasNSView: NSView {
         viewModel.selectedTool = .text
 
         let font = NSFont.systemFont(ofSize: annotation.fontSize)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font]
-        let textSize = (annotation.text as NSString).size(withAttributes: attrs)
 
-        let maxWidth = bounds.width - annotation.startPoint.x - 10
         let tf = NSTextField(frame: NSRect(
             x: annotation.startPoint.x,
             y: annotation.startPoint.y,
-            width: max(min(300, max(textSize.width + 20, 100)), maxWidth > 100 ? 100 : maxWidth),
+            width: 20,
             height: annotation.fontSize + 8
         ))
         tf.isEditable = true
@@ -520,15 +517,16 @@ final class DrawingCanvasNSView: NSView {
         tf.focusRingType = .none
         tf.delegate = self
         tf.stringValue = annotation.text
-        tf.cell?.isScrollable = true
+        tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
         configureTextFieldStyle(tf)
 
         addSubview(tf)
+        textField = tf
+        resizeTextFieldToFit(tf)
         tf.becomeFirstResponder()
         tf.currentEditor()?.selectAll(nil)
-        textField = tf
         needsDisplay = true
     }
 
@@ -574,5 +572,20 @@ extension DrawingCanvasNSView: NSTextFieldDelegate {
             return true
         }
         return false
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let tf = textField else { return }
+        resizeTextFieldToFit(tf)
+    }
+
+    private func resizeTextFieldToFit(_ tf: NSTextField) {
+        let font = tf.font ?? NSFont.systemFont(ofSize: viewModel.currentFontSize)
+        let text = tf.stringValue.isEmpty ? " " : tf.stringValue
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let maxWidth = bounds.width - tf.frame.origin.x - 10
+        let newWidth = min(max(textSize.width + 12, 20), maxWidth)
+        tf.frame.size.width = newWidth
     }
 }
