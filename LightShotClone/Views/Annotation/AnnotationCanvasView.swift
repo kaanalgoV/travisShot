@@ -39,6 +39,17 @@ final class DrawingCanvasNSView: NSView {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
             .store(in: &cancellables)
+
+        // Commit & remove text field when switching away from text tool
+        viewModel.$selectedTool
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tool in
+                guard let self = self else { return }
+                if tool != .text {
+                    self.commitTextField()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -465,28 +476,32 @@ final class DrawingCanvasNSView: NSView {
     private func showTextField(at point: CGPoint) {
         commitTextField()
 
+        let fontSize = viewModel.currentFontSize
         let minWidth: CGFloat = 20
         let tf = NSTextField(frame: NSRect(
             x: point.x,
             y: point.y,
             width: minWidth,
-            height: viewModel.currentFontSize + 8
+            height: fontSize + 8
         ))
         tf.isEditable = true
         tf.isBordered = false
-        tf.font = NSFont.systemFont(ofSize: viewModel.currentFontSize)
+        tf.font = NSFont.systemFont(ofSize: fontSize)
         tf.textColor = NSColor(viewModel.currentColor)
         tf.focusRingType = .none
         tf.delegate = self
         tf.stringValue = ""
+        tf.usesSingleLineMode = true
         tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
         configureTextFieldStyle(tf)
 
         addSubview(tf)
-        tf.becomeFirstResponder()
         textField = tf
+        tf.becomeFirstResponder()
+        // Reset frame after field editor installs (it can auto-expand)
+        tf.frame = NSRect(x: point.x, y: point.y, width: minWidth, height: fontSize + 8)
     }
 
     /// Open a text editor on an existing text annotation (for re-editing)
@@ -503,12 +518,13 @@ final class DrawingCanvasNSView: NSView {
         viewModel.selectedTool = .text
 
         let font = NSFont.systemFont(ofSize: annotation.fontSize)
+        let height = annotation.fontSize + 8
 
         let tf = NSTextField(frame: NSRect(
             x: annotation.startPoint.x,
             y: annotation.startPoint.y,
             width: 20,
-            height: annotation.fontSize + 8
+            height: height
         ))
         tf.isEditable = true
         tf.isBordered = false
@@ -517,6 +533,7 @@ final class DrawingCanvasNSView: NSView {
         tf.focusRingType = .none
         tf.delegate = self
         tf.stringValue = annotation.text
+        tf.usesSingleLineMode = true
         tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
@@ -525,7 +542,10 @@ final class DrawingCanvasNSView: NSView {
         addSubview(tf)
         textField = tf
         resizeTextFieldToFit(tf)
+        let fittedWidth = tf.frame.size.width
         tf.becomeFirstResponder()
+        // Reset frame after field editor installs (it can auto-expand)
+        tf.frame.size = NSSize(width: fittedWidth, height: height)
         tf.currentEditor()?.selectAll(nil)
         needsDisplay = true
     }
