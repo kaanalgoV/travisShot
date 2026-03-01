@@ -30,6 +30,7 @@ struct HotkeySettingsView: View {
                         ShortcutField(label: "Rectangle", key: .shortcutRectangle)
                         ShortcutField(label: "Text", key: .shortcutText)
                         ShortcutField(label: "Marker", key: .shortcutMarker)
+                        ShortcutField(label: "Number", key: .shortcutNumber)
                         ShortcutField(label: "Freeze", key: .shortcutFreeze)
                     }
                 }

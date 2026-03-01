@@ -14,9 +14,18 @@ final class CaptureViewModel: ObservableObject {
     // Screenshot data
     @Published var capturedImage: CGImage? = nil
 
+    // Frozen screen state
+    @Published var isFrozen: Bool = false {
+        didSet {
+            if !isFrozen { onUnfreeze?() }
+        }
+    }
+    @Published var frozenImage: CGImage?
+
     // Callbacks
     var onSelectionComplete: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
+    var onUnfreeze: (() -> Void)?
 
     enum ResizeHandle: CaseIterable, Hashable {
         case topLeft, topRight, bottomLeft, bottomRight

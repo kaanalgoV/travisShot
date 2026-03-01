@@ -6,6 +6,8 @@ struct SelectionOverlayView: View {
 
     var body: some View {
         ZStack {
+            // Frozen screenshot is rendered by AppKit NSImageView behind this view.
+
             // Dimming overlay with cutout
             DimmingShape(cutout: viewModel.selectionRect)
                 .fill(Color.black.opacity(0.4), style: FillStyle(eoFill: true))
@@ -44,8 +46,10 @@ struct SelectionOverlayView: View {
                     )
                     .allowsHitTesting(false)
             }
+
+            // Unfreeze is now handled by the editing toolbar button
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: screenFrame.width, height: screenFrame.height)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .local)

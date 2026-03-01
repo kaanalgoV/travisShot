@@ -52,6 +52,41 @@ enum AnnotationRenderer {
             context.textPosition = CGPoint(x: annotation.startPoint.x, y: annotation.startPoint.y + annotation.fontSize)
             CTLineDraw(line, context)
             context.restoreGState()
+
+        case .number:
+            let diameter = max(28, annotation.fontSize * 1.6)
+            let radius = diameter / 2
+            let circleRect = CGRect(
+                x: annotation.startPoint.x - radius,
+                y: annotation.startPoint.y - radius,
+                width: diameter,
+                height: diameter
+            )
+            context.fillEllipse(in: circleRect)
+
+            context.saveGState()
+            context.setStrokeColor(NSColor.white.cgColor)
+            context.setLineWidth(2)
+            context.strokeEllipse(in: circleRect)
+            context.restoreGState()
+
+            // Draw number text centered using NSGraphicsContext for correct flipped rendering
+            let numStr = "\(annotation.numberValue)" as NSString
+            let numFont = NSFont.boldSystemFont(ofSize: annotation.fontSize)
+            let numAttrs: [NSAttributedString.Key: Any] = [
+                .font: numFont,
+                .foregroundColor: NSColor.white
+            ]
+            let textSize = numStr.size(withAttributes: numAttrs)
+            let textPoint = CGPoint(
+                x: annotation.startPoint.x - textSize.width / 2,
+                y: annotation.startPoint.y - textSize.height / 2
+            )
+            let nsCtx = NSGraphicsContext(cgContext: context, flipped: true)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = nsCtx
+            numStr.draw(at: textPoint, withAttributes: numAttrs)
+            NSGraphicsContext.restoreGraphicsState()
         }
     }
 

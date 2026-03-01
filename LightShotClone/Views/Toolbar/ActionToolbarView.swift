@@ -1,3 +1,4 @@
+import Defaults
 import SwiftUI
 
 struct ActionToolbarView: View {
@@ -9,11 +10,11 @@ struct ActionToolbarView: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ActionButton(systemImage: "icloud.and.arrow.up", tooltip: "Upload (Cmd+D)", action: onUpload)
-            ActionButton(systemImage: "magnifyingglass", tooltip: "Search Similar Images", action: onSearchSimilar)
-            ActionButton(systemImage: "printer", tooltip: "Print (Cmd+P)", action: onPrint)
-            ActionButton(systemImage: "doc.on.clipboard", tooltip: "Copy (Cmd+C)", action: onCopy)
-            ActionButton(systemImage: "square.and.arrow.down", tooltip: "Save (Cmd+S)", action: onSave)
+            ActionButton(systemImage: "icloud.and.arrow.up", tooltip: "Upload (Cmd+\(Defaults[.shortcutUpload].uppercased()))", action: onUpload)
+            ActionButton(systemImage: "magnifyingglass", tooltip: "Search Similar", action: onSearchSimilar)
+            ActionButton(systemImage: "printer", tooltip: "Print (Cmd+\(Defaults[.shortcutPrint].uppercased()))", action: onPrint)
+            ActionButton(systemImage: "doc.on.clipboard", tooltip: "Copy (Cmd+\(Defaults[.shortcutCopy].uppercased()))", action: onCopy)
+            ActionButton(systemImage: "square.and.arrow.down", tooltip: "Save (Cmd+\(Defaults[.shortcutSave].uppercased()))", action: onSave)
         }
         .padding(8)
         .background(
@@ -48,6 +49,6 @@ struct ActionButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .help(tooltip)
+        .customTooltip(tooltip, edge: .maxY)
     }
 }

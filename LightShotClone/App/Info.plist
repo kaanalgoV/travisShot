@@ -4,6 +4,10 @@
 <dict>
     <key>LSUIElement</key>
     <true/>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>TravisShot needs screen recording permission to capture screenshots.</string>
     <key>CFBundleName</key>

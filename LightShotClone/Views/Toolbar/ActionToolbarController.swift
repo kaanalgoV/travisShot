@@ -37,6 +37,7 @@ final class ActionToolbarController {
         panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
+        panel.isReleasedWhenClosed = false
 
         let view = ActionToolbarView(
             onUpload: onUpload,

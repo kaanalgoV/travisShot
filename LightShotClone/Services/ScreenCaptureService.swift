@@ -23,8 +23,20 @@ final class ScreenCaptureService {
         )
 
         let config = SCStreamConfiguration()
-        config.width = display.width * 2  // Retina
-        config.height = display.height * 2 // Retina
+        // Determine correct pixel dimensions for capture.
+        // SCDisplay.width/height may be in points or pixels depending on macOS version.
+        // Match against NSScreen to detect which and compute native pixel resolution.
+        let matchingScreen = NSScreen.screens.first { abs(Int($0.frame.width) - display.width) < 2 }
+        if let screen = matchingScreen {
+            // display.width matches screen point width → multiply by scale
+            let scale = screen.backingScaleFactor
+            config.width = Int(screen.frame.width * scale)
+            config.height = Int(screen.frame.height * scale)
+        } else {
+            // display.width is already in native pixels → use as-is
+            config.width = display.width
+            config.height = display.height
+        }
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = showCursor
 

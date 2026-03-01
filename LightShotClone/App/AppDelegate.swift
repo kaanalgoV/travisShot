@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if char == Defaults[.shortcutRectangle] { self.annotationVM.selectTool(.rectangle); return nil }
                 if char == Defaults[.shortcutText] { self.annotationVM.selectTool(.text); return nil }
                 if char == Defaults[.shortcutMarker] { self.annotationVM.selectTool(.marker); return nil }
+                if char == Defaults[.shortcutNumber] { self.annotationVM.selectTool(.number); return nil }
                 if char == Defaults[.shortcutFreeze] {
                     if let toolbar = self.editingToolbar {
                         if toolbar.isFrozen {

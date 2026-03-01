@@ -178,6 +178,38 @@ final class DrawingCanvasNSView: NSView {
                 .foregroundColor: nsColor
             ]
             (annotation.text as NSString).draw(at: annotation.startPoint, withAttributes: attrs)
+
+        case .number:
+            let diameter = max(28, annotation.fontSize * 1.6)
+            let radius = diameter / 2
+            let circleRect = CGRect(
+                x: annotation.startPoint.x - radius,
+                y: annotation.startPoint.y - radius,
+                width: diameter,
+                height: diameter
+            )
+            ctx.fillEllipse(in: circleRect)
+
+            // White border
+            ctx.saveGState()
+            ctx.setStrokeColor(NSColor.white.cgColor)
+            ctx.setLineWidth(2)
+            ctx.strokeEllipse(in: circleRect)
+            ctx.restoreGState()
+
+            // Number text centered
+            let numStr = "\(annotation.numberValue)" as NSString
+            let numFont = NSFont.boldSystemFont(ofSize: annotation.fontSize)
+            let numAttrs: [NSAttributedString.Key: Any] = [
+                .font: numFont,
+                .foregroundColor: NSColor.white
+            ]
+            let textSize = numStr.size(withAttributes: numAttrs)
+            let textPoint = CGPoint(
+                x: annotation.startPoint.x - textSize.width / 2,
+                y: annotation.startPoint.y - textSize.height / 2
+            )
+            numStr.draw(at: textPoint, withAttributes: numAttrs)
         }
     }
 
@@ -336,7 +368,7 @@ final class DrawingCanvasNSView: NSView {
             return
         }
 
-        guard viewModel.selectedTool != nil, viewModel.selectedTool != .text else { return }
+        guard let tool = viewModel.selectedTool, tool != .text, tool != .number else { return }
         viewModel.continueStroke(to: point)
         needsDisplay = true
     }
@@ -357,7 +389,7 @@ final class DrawingCanvasNSView: NSView {
             return
         }
 
-        guard viewModel.selectedTool != nil, viewModel.selectedTool != .text else { return }
+        guard let tool = viewModel.selectedTool, tool != .text, tool != .number else { return }
         let point = convert(event.locationInWindow, from: nil)
         viewModel.endStroke(at: point)
         needsDisplay = true
@@ -395,7 +427,7 @@ final class DrawingCanvasNSView: NSView {
         sizeIndicatorPanel?.close()
         sizeIndicatorPanel = nil
 
-        let isText = viewModel.selectedTool == .text || viewModel.isEditingText
+        let isText = viewModel.selectedTool == .text || viewModel.selectedTool == .number || viewModel.isEditingText
         let value = isText ? viewModel.currentFontSize : viewModel.currentLineWidth
         let label = isText ? "Font: \(Int(value))pt" : "Width: \(String(format: "%.1f", value))px"
 
@@ -478,12 +510,8 @@ final class DrawingCanvasNSView: NSView {
 
         let fontSize = viewModel.currentFontSize
         let minWidth: CGFloat = 20
-        let tf = NSTextField(frame: NSRect(
-            x: point.x,
-            y: point.y,
-            width: minWidth,
-            height: fontSize + 8
-        ))
+        let height = fontSize + 8
+        let tf = NSTextField(frame: NSRect(x: point.x, y: point.y, width: minWidth, height: height))
         tf.isEditable = true
         tf.isBordered = false
         tf.font = NSFont.systemFont(ofSize: fontSize)
@@ -492,6 +520,8 @@ final class DrawingCanvasNSView: NSView {
         tf.delegate = self
         tf.stringValue = ""
         tf.usesSingleLineMode = true
+        tf.maximumNumberOfLines = 1
+        tf.autoresizingMask = []
         tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
@@ -500,8 +530,10 @@ final class DrawingCanvasNSView: NSView {
         addSubview(tf)
         textField = tf
         tf.becomeFirstResponder()
-        // Reset frame after field editor installs (it can auto-expand)
-        tf.frame = NSRect(x: point.x, y: point.y, width: minWidth, height: fontSize + 8)
+        // Field editor installation can auto-expand — snap back on next run loop
+        DispatchQueue.main.async { [weak tf] in
+            tf?.frame = NSRect(x: point.x, y: point.y, width: minWidth, height: height)
+        }
     }
 
     /// Open a text editor on an existing text annotation (for re-editing)
@@ -519,13 +551,9 @@ final class DrawingCanvasNSView: NSView {
 
         let font = NSFont.systemFont(ofSize: annotation.fontSize)
         let height = annotation.fontSize + 8
+        let origin = annotation.startPoint
 
-        let tf = NSTextField(frame: NSRect(
-            x: annotation.startPoint.x,
-            y: annotation.startPoint.y,
-            width: 20,
-            height: height
-        ))
+        let tf = NSTextField(frame: NSRect(x: origin.x, y: origin.y, width: 20, height: height))
         tf.isEditable = true
         tf.isBordered = false
         tf.font = font
@@ -534,6 +562,8 @@ final class DrawingCanvasNSView: NSView {
         tf.delegate = self
         tf.stringValue = annotation.text
         tf.usesSingleLineMode = true
+        tf.maximumNumberOfLines = 1
+        tf.autoresizingMask = []
         tf.cell?.isScrollable = false
         tf.cell?.wraps = false
         tf.cell?.lineBreakMode = .byClipping
@@ -544,9 +574,11 @@ final class DrawingCanvasNSView: NSView {
         resizeTextFieldToFit(tf)
         let fittedWidth = tf.frame.size.width
         tf.becomeFirstResponder()
-        // Reset frame after field editor installs (it can auto-expand)
-        tf.frame.size = NSSize(width: fittedWidth, height: height)
         tf.currentEditor()?.selectAll(nil)
+        // Field editor installation can auto-expand — snap back on next run loop
+        DispatchQueue.main.async { [weak tf] in
+            tf?.frame = NSRect(x: origin.x, y: origin.y, width: fittedWidth, height: height)
+        }
         needsDisplay = true
     }
 

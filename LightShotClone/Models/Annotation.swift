@@ -10,6 +10,7 @@ struct Annotation: Identifiable {
     var text: String = ""
     var fontSize: CGFloat = 16
     var freehandPoints: [CGPoint] = []
+    var numberValue: Int = 0
 
     /// The normalized bounding rect of this annotation
     var boundingRect: CGRect {
@@ -52,6 +53,11 @@ struct Annotation: Identifiable {
             let textSize = (text as NSString).size(withAttributes: attrs)
             let textRect = CGRect(origin: startPoint, size: textSize)
             return textRect.insetBy(dx: -threshold, dy: -threshold).contains(point)
+
+        case .number:
+            let diameter = max(28, fontSize * 1.6)
+            let radius = diameter / 2
+            return hypot(point.x - startPoint.x, point.y - startPoint.y) < radius + threshold
         }
     }
 
@@ -90,6 +96,14 @@ struct Annotation: Identifiable {
             return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
         case .rectangle:
             return boundingRect
+        case .number:
+            let diameter = max(28, fontSize * 1.6)
+            return CGRect(
+                x: startPoint.x - diameter / 2,
+                y: startPoint.y - diameter / 2,
+                width: diameter,
+                height: diameter
+            )
         case .select:
             return .zero
         }

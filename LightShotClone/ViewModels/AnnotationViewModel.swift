@@ -88,6 +88,22 @@ final class AnnotationViewModel: ObservableObject {
             return
         }
 
+        if tool == .number {
+            let nextNum = (annotations.filter { $0.tool == .number }.map(\.numberValue).max() ?? 0) + 1
+            let annotation = Annotation(
+                tool: .number,
+                startPoint: point,
+                endPoint: point,
+                color: currentColor,
+                lineWidth: currentLineWidth,
+                fontSize: currentFontSize,
+                numberValue: nextNum
+            )
+            pushUndo()
+            annotations.append(annotation)
+            return
+        }
+
         let color: Color = (tool == .marker) ? .yellow.opacity(0.4) : currentColor
         let lineWidth: CGFloat = (tool == .marker) ? max(currentLineWidth * 5, 20) : currentLineWidth
 
@@ -156,7 +172,7 @@ final class AnnotationViewModel: ObservableObject {
     // MARK: - Line Width / Font Size (scroll wheel)
 
     func adjustSize(delta: CGFloat) {
-        if selectedTool == .text || isEditingText {
+        if selectedTool == .text || selectedTool == .number || isEditingText {
             currentFontSize = max(8, min(72, currentFontSize + delta))
         } else {
             currentLineWidth = max(1, min(20, currentLineWidth + delta))

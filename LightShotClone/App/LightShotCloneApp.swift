@@ -21,6 +21,7 @@ struct TravisShotApp: App {
             Divider()
 
             Button("Quit TravisShot") {
+                appDelegate.userRequestedQuit = true
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")

@@ -31,6 +31,7 @@ extension Defaults.Keys {
     static let shortcutRectangle = Key<String>("shortcutRectangle", default: "r")
     static let shortcutText = Key<String>("shortcutText", default: "t")
     static let shortcutMarker = Key<String>("shortcutMarker", default: "m")
+    static let shortcutNumber = Key<String>("shortcutNumber", default: "n")
 
     // Toggle shortcuts (single character, no modifier — active during capture)
     static let shortcutFreeze = Key<String>("shortcutFreeze", default: "f")
