@@ -187,6 +187,58 @@ final class AnnotationTests: XCTestCase {
         XCTAssertEqual(rect.maxY, 202) // 200 + 4/2
     }
 
+    // MARK: - Number Hit Test
+
+    func testHitTestNumber() {
+        let annotation = Annotation(
+            tool: .number,
+            startPoint: CGPoint(x: 100, y: 100),
+            endPoint: CGPoint(x: 100, y: 100),
+            color: .red,
+            lineWidth: 2,
+            fontSize: 16,
+            numberValue: 1
+        )
+        // Point at center
+        XCTAssertTrue(annotation.hitTest(point: CGPoint(x: 100, y: 100)))
+        // Point near edge of circle (diameter = max(28, 16*1.6) = 28, radius = 14)
+        XCTAssertTrue(annotation.hitTest(point: CGPoint(x: 112, y: 100)))
+        // Point far away
+        XCTAssertFalse(annotation.hitTest(point: CGPoint(x: 200, y: 200)))
+    }
+
+    func testTranslateNumber() {
+        var annotation = Annotation(
+            tool: .number,
+            startPoint: CGPoint(x: 50, y: 50),
+            endPoint: CGPoint(x: 50, y: 50),
+            color: .red,
+            lineWidth: 2,
+            numberValue: 3
+        )
+        annotation.translate(by: CGSize(width: 20, height: -10))
+        XCTAssertEqual(annotation.startPoint.x, 70)
+        XCTAssertEqual(annotation.startPoint.y, 40)
+    }
+
+    func testSelectionRectNumber() {
+        let annotation = Annotation(
+            tool: .number,
+            startPoint: CGPoint(x: 100, y: 100),
+            endPoint: CGPoint(x: 100, y: 100),
+            color: .red,
+            lineWidth: 2,
+            fontSize: 16,
+            numberValue: 1
+        )
+        let rect = annotation.selectionRect()
+        // diameter = max(28, 16*1.6) = 28, radius = 14
+        XCTAssertEqual(rect.minX, 86)  // 100 - 14
+        XCTAssertEqual(rect.minY, 86)  // 100 - 14
+        XCTAssertEqual(rect.width, 28)
+        XCTAssertEqual(rect.height, 28)
+    }
+
     func testSelectionRectPen() {
         let annotation = Annotation(
             tool: .pen,

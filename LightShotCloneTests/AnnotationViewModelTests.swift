@@ -163,4 +163,74 @@ final class AnnotationViewModelTests: XCTestCase {
         vm.moveSelectedAnnotation(by: CGSize(width: 10, height: 10))
         // No crash = pass
     }
+
+    // MARK: - Number Tool Tests
+
+    func testNumberToolPlacesAnnotation() {
+        let vm = AnnotationViewModel()
+        vm.selectedTool = .number
+        vm.beginStroke(at: CGPoint(x: 100, y: 200))
+
+        XCTAssertEqual(vm.annotations.count, 1)
+        XCTAssertEqual(vm.annotations[0].tool, .number)
+        XCTAssertEqual(vm.annotations[0].numberValue, 1)
+        XCTAssertEqual(vm.annotations[0].startPoint, CGPoint(x: 100, y: 200))
+        // Number tool should not set currentAnnotation (no drag)
+        XCTAssertNil(vm.currentAnnotation)
+    }
+
+    func testNumberToolAutoIncrements() {
+        let vm = AnnotationViewModel()
+        vm.selectedTool = .number
+        vm.beginStroke(at: CGPoint(x: 10, y: 10))
+        vm.beginStroke(at: CGPoint(x: 50, y: 50))
+        vm.beginStroke(at: CGPoint(x: 90, y: 90))
+
+        XCTAssertEqual(vm.annotations.count, 3)
+        XCTAssertEqual(vm.annotations[0].numberValue, 1)
+        XCTAssertEqual(vm.annotations[1].numberValue, 2)
+        XCTAssertEqual(vm.annotations[2].numberValue, 3)
+    }
+
+    func testNumberToolUndoDecrementsNextNumber() {
+        let vm = AnnotationViewModel()
+        vm.selectedTool = .number
+        vm.beginStroke(at: CGPoint(x: 10, y: 10))
+        vm.beginStroke(at: CGPoint(x: 50, y: 50))
+        vm.beginStroke(at: CGPoint(x: 90, y: 90))
+        XCTAssertEqual(vm.annotations.count, 3)
+
+        vm.undo() // remove 3
+        XCTAssertEqual(vm.annotations.count, 2)
+
+        // Next number should be 3 again (max existing = 2, so 2+1=3)
+        vm.beginStroke(at: CGPoint(x: 120, y: 120))
+        XCTAssertEqual(vm.annotations.count, 3)
+        XCTAssertEqual(vm.annotations[2].numberValue, 3)
+    }
+
+    func testNumberToolDeletedNumberDoesNotCreateDuplicate() {
+        let vm = AnnotationViewModel()
+        vm.selectedTool = .number
+        vm.beginStroke(at: CGPoint(x: 10, y: 10))   // 1
+        vm.beginStroke(at: CGPoint(x: 50, y: 50))   // 2
+        vm.beginStroke(at: CGPoint(x: 90, y: 90))   // 3
+
+        // Delete number 2
+        vm.selectAnnotation(at: 1)
+        vm.deleteSelectedAnnotation()
+        XCTAssertEqual(vm.annotations.count, 2)
+
+        // Next number should be 4 (max existing = 3, so 3+1=4)
+        vm.beginStroke(at: CGPoint(x: 120, y: 120))
+        XCTAssertEqual(vm.annotations[2].numberValue, 4)
+    }
+
+    func testNumberToolUsesCurrentColor() {
+        let vm = AnnotationViewModel()
+        vm.selectedTool = .number
+        vm.currentColor = .blue
+        vm.beginStroke(at: CGPoint(x: 100, y: 200))
+        XCTAssertEqual(vm.annotations[0].color, .blue)
+    }
 }

@@ -77,8 +77,23 @@ final class AnnotationViewModel: ObservableObject {
 
     // MARK: - Drawing
 
+    private func log(_ msg: String) {
+        let line = "[\(Date())] \(msg)\n"
+        if let data = line.data(using: .utf8) {
+            if let fh = FileHandle(forWritingAtPath: "/tmp/travisshot_debug.log") {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                fh.closeFile()
+            }
+        }
+    }
+
     func beginStroke(at point: CGPoint) {
-        guard let tool = selectedTool else { return }
+        guard let tool = selectedTool else {
+            log("beginStroke: no tool selected")
+            return
+        }
+        log("beginStroke: tool=\(tool), point=\(point)")
 
         if tool == .text {
             commitTextIfNeeded()
@@ -90,6 +105,7 @@ final class AnnotationViewModel: ObservableObject {
 
         if tool == .number {
             let nextNum = (annotations.filter { $0.tool == .number }.map(\.numberValue).max() ?? 0) + 1
+            log("number tool: placing #\(nextNum) at \(point), color=\(currentColor), fontSize=\(currentFontSize)")
             let annotation = Annotation(
                 tool: .number,
                 startPoint: point,
@@ -101,6 +117,7 @@ final class AnnotationViewModel: ObservableObject {
             )
             pushUndo()
             annotations.append(annotation)
+            log("number tool: annotations count = \(annotations.count)")
             return
         }
 
