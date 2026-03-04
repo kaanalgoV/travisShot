@@ -51,6 +51,15 @@ struct EditingToolbarView: View {
                 annotationVM.undo()
             }
 
+            // Clear All
+            ToolButton(
+                systemImage: "trash",
+                isSelected: false,
+                tooltip: "Clear All (\(Defaults[.shortcutClearAll].uppercased()))"
+            ) {
+                annotationVM.clearAll()
+            }
+
             // Close
             ToolButton(
                 systemImage: "xmark",

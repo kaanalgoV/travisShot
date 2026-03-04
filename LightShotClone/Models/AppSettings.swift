@@ -35,6 +35,7 @@ extension Defaults.Keys {
 
     // Toggle shortcuts (single character, no modifier — active during capture)
     static let shortcutFreeze = Key<String>("shortcutFreeze", default: "f")
+    static let shortcutClearAll = Key<String>("shortcutClearAll", default: "x")
 
     // Action shortcuts (character used with Cmd modifier — active during capture)
     static let shortcutCopy = Key<String>("shortcutCopy", default: "c")

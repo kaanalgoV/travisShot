@@ -205,6 +205,16 @@ final class AnnotationViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Clear All
+
+    func clearAll() {
+        guard !annotations.isEmpty else { return }
+        pushUndo()
+        annotations = []
+        selectedAnnotationIndex = nil
+        currentAnnotation = nil
+    }
+
     /// Render all annotations onto a CGImage and return the composited result.
     /// Annotations are in full-screen coordinates; selectionRect.origin is the offset to crop-relative coords.
     func renderAnnotations(onto image: CGImage, selectionRect: CGRect, scale: CGFloat = 2.0) -> CGImage? {

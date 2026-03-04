@@ -5,6 +5,7 @@ import ScreenCaptureKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
     private var overlayController: OverlayWindowController?
     private var editingToolbar: EditingToolbarController?
     private var actionToolbar: ActionToolbarController?
@@ -31,8 +32,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.disableSuddenTermination()
         migrateHotkeysIfNeeded()
         registerHotkeys()
+        setupStatusBarMenu()
     }
 
+    // MARK: - Status Bar Menu
+
+    private func setupStatusBarMenu() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "TravisShot")
+        statusItem = item
+
+        let menu = NSMenu()
+
+        let capture = NSMenuItem(title: "Capture Region", action: #selector(captureRegionMenuAction), keyEquivalent: "")
+        capture.target = self
+        capture.setShortcut(for: .captureRegion)
+        menu.addItem(capture)
+
+        menu.addItem(.separator())
+
+        let prefs = NSMenuItem(title: "Preferences...", action: #selector(preferencesMenuAction), keyEquivalent: ",")
+        prefs.target = self
+        prefs.keyEquivalentModifierMask = [.command]
+        menu.addItem(prefs)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit TravisShot", action: #selector(quitMenuAction), keyEquivalent: "q")
+        quit.target = self
+        quit.keyEquivalentModifierMask = [.command]
+        menu.addItem(quit)
+
+        item.menu = menu
+    }
+
+    @objc private func captureRegionMenuAction() {
+        startRegionCapture()
+    }
+
+    @objc private func preferencesMenuAction() {
+        openPreferences()
+    }
+
+    @objc private func quitMenuAction() {
+        userRequestedQuit = true
+        NSApplication.shared.terminate(nil)
+    }
     /// One-time migration: reset global hotkeys so code defaults (Cmd+^) take effect
     private func migrateHotkeysIfNeeded() {
         guard !Defaults[.hotkeyMigrationV2] else { return }
@@ -92,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = NSHostingView(rootView: SettingsView())
         window.center()
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
         window.makeKeyAndOrderFront(nil)
         settingsWindow = window
     }
@@ -115,6 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Region Capture
 
     func startRegionCapture() {
+        // Prevent re-entry: if a capture session is already active, ignore the shortcut
+        guard overlayController == nil else { return }
+
         Task { @MainActor in
             do {
                 let displays = try await ScreenCaptureService.availableDisplays()
@@ -281,6 +330,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.debugLog("Number shortcut pressed, selecting .number tool")
                     self.annotationVM.selectTool(.number)
                     self.debugLog("selectedTool is now: \(String(describing: self.annotationVM.selectedTool))")
+                    return nil
+                }
+                if char == Defaults[.shortcutClearAll] {
+                    self.annotationVM.clearAll()
+                    self.drawingCanvas?.forceRedraw()
                     return nil
                 }
                 if char == Defaults[.shortcutFreeze] {
