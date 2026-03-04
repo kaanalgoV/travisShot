@@ -278,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel: annotationVM,
             frame: NSRect(origin: .zero, size: fullScreenRect.size)
         )
+        canvas.screenCapture = screenCapture
         canvas.autoresizingMask = [.width, .height]
         window.contentView = canvas
         drawingCanvas = canvas
@@ -332,6 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.debugLog("selectedTool is now: \(String(describing: self.annotationVM.selectedTool))")
                     return nil
                 }
+                if char == Defaults[.shortcutBlur] { self.annotationVM.selectTool(.blur); return nil }
                 if char == Defaults[.shortcutClearAll] {
                     self.annotationVM.clearAll()
                     self.drawingCanvas?.forceRedraw()
@@ -373,6 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     showCursor: Defaults[.captureCursor]
                 )
                 self.screenCapture = newCapture
+                self.drawingCanvas?.screenCapture = newCapture
                 self.overlayController?.freeze(newImage: newCapture)
                 editToolbar.setFrozen(true)
             } catch {

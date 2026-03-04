@@ -87,6 +87,7 @@ struct EditingToolbarView: View {
         case .text: return Defaults[.shortcutText]
         case .marker: return Defaults[.shortcutMarker]
         case .number: return Defaults[.shortcutNumber]
+        case .blur: return Defaults[.shortcutBlur]
         }
     }
 }

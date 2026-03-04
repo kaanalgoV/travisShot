@@ -6,6 +6,9 @@ import SwiftUI
 /// Covers the FULL SCREEN so the user can draw anywhere (useful for webinars).
 final class DrawingCanvasNSView: NSView {
     let viewModel: AnnotationViewModel
+    /// Frozen screenshot used for blur annotation preview
+    var screenCapture: CGImage?
+    private let ciContext = CIContext()
     private var textField: NSTextField?
     private var cancellables = Set<AnyCancellable>()
     private var sizeIndicatorPanel: NSPanel?
@@ -210,6 +213,46 @@ final class DrawingCanvasNSView: NSView {
                 y: annotation.startPoint.y - textSize.height / 2
             )
             numStr.draw(at: textPoint, withAttributes: numAttrs)
+
+        case .blur:
+            let rect = annotation.boundingRect
+            guard rect.width > 1, rect.height > 1, let capture = screenCapture else {
+                // Fallback: draw a crosshatch pattern
+                ctx.saveGState()
+                ctx.setStrokeColor(NSColor.gray.withAlphaComponent(0.5).cgColor)
+                ctx.setLineWidth(1)
+                ctx.setLineDash(phase: 0, lengths: [4, 4])
+                ctx.stroke(rect)
+                ctx.restoreGState()
+                return
+            }
+
+            let scaleX = CGFloat(capture.width) / bounds.width
+            let scaleY = CGFloat(capture.height) / bounds.height
+            let pixelRect = CGRect(
+                x: rect.minX * scaleX,
+                y: rect.minY * scaleY,
+                width: rect.width * scaleX,
+                height: rect.height * scaleY
+            )
+            let imageBounds = CGRect(x: 0, y: 0, width: CGFloat(capture.width), height: CGFloat(capture.height))
+            let clampedRect = pixelRect.intersection(imageBounds)
+            guard !clampedRect.isEmpty, let cropped = capture.cropping(to: clampedRect) else { return }
+
+            let ciImage = CIImage(cgImage: cropped)
+            let pixelScale = max(8, min(rect.width, rect.height) * scaleX / 8)
+            guard let filter = CIFilter(name: "CIPixellate") else { return }
+            filter.setValue(ciImage, forKey: kCIInputImageKey)
+            filter.setValue(pixelScale as NSNumber, forKey: kCIInputScaleKey)
+
+            guard let output = filter.outputImage,
+                  let pixelated = ciContext.createCGImage(output, from: ciImage.extent) else { return }
+
+            ctx.saveGState()
+            ctx.translateBy(x: rect.minX, y: rect.maxY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(pixelated, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+            ctx.restoreGState()
         }
     }
 

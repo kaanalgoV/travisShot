@@ -58,6 +58,9 @@ struct Annotation: Identifiable {
             let diameter = max(28, fontSize * 1.6)
             let radius = diameter / 2
             return hypot(point.x - startPoint.x, point.y - startPoint.y) < radius + threshold
+
+        case .blur:
+            return boundingRect.insetBy(dx: -threshold, dy: -threshold).contains(point)
         }
     }
 
@@ -104,6 +107,8 @@ struct Annotation: Identifiable {
                 width: diameter,
                 height: diameter
             )
+        case .blur:
+            return boundingRect
         case .select:
             return .zero
         }

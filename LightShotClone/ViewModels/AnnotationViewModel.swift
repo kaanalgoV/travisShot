@@ -240,7 +240,7 @@ final class AnnotationViewModel: ObservableObject {
         context.translateBy(x: -selectionRect.origin.x, y: -selectionRect.origin.y)
 
         for annotation in annotations {
-            AnnotationRenderer.draw(annotation, in: context, canvasSize: selectionRect.size)
+            AnnotationRenderer.draw(annotation, in: context, canvasSize: selectionRect.size, sourceImage: image, selectionRect: selectionRect, imageScale: scale)
         }
 
         return context.makeImage()

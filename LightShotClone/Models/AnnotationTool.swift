@@ -9,6 +9,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
     case text
     case marker
     case number
+    case blur
 
     var id: String { rawValue }
 
@@ -22,6 +23,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
         case .text: return "Text"
         case .marker: return "Marker"
         case .number: return "Number"
+        case .blur: return "Blur"
         }
     }
 
@@ -35,6 +37,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
         case .text: return "textformat"
         case .marker: return "highlighter"
         case .number: return "1.circle"
+        case .blur: return "eye.slash"
         }
     }
 }

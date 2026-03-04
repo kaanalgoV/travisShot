@@ -4,7 +4,8 @@ import SwiftUI
 enum AnnotationRenderer {
     /// Draw an annotation into a CGContext (for final image rendering).
     /// `canvasOffset` translates annotations from full-screen coords to crop-relative coords.
-    static func draw(_ annotation: Annotation, in context: CGContext, canvasSize: CGSize, canvasOffset: CGPoint = .zero) {
+    /// `sourceImage`, `selectionRect`, and `imageScale` are needed for blur annotations.
+    static func draw(_ annotation: Annotation, in context: CGContext, canvasSize: CGSize, canvasOffset: CGPoint = .zero, sourceImage: CGImage? = nil, selectionRect: CGRect? = nil, imageScale: CGFloat = 1.0) {
         let nsColor = NSColor(annotation.color)
         context.setStrokeColor(nsColor.cgColor)
         context.setFillColor(nsColor.cgColor)
@@ -87,7 +88,46 @@ enum AnnotationRenderer {
             NSGraphicsContext.current = nsCtx
             numStr.draw(at: textPoint, withAttributes: numAttrs)
             NSGraphicsContext.restoreGraphicsState()
+
+        case .blur:
+            drawBlur(annotation, in: context, sourceImage: sourceImage, selectionRect: selectionRect, imageScale: imageScale)
         }
+    }
+
+    // MARK: - Blur Drawing
+
+    private static func drawBlur(_ annotation: Annotation, in context: CGContext, sourceImage: CGImage?, selectionRect: CGRect?, imageScale: CGFloat) {
+        let rect = annotation.boundingRect
+        guard rect.width > 1, rect.height > 1,
+              let source = sourceImage,
+              let selection = selectionRect else { return }
+
+        let pixelRect = CGRect(
+            x: (rect.minX - selection.minX) * imageScale,
+            y: (rect.minY - selection.minY) * imageScale,
+            width: rect.width * imageScale,
+            height: rect.height * imageScale
+        )
+
+        let imageBounds = CGRect(x: 0, y: 0, width: CGFloat(source.width), height: CGFloat(source.height))
+        let clampedRect = pixelRect.intersection(imageBounds)
+        guard !clampedRect.isEmpty, let cropped = source.cropping(to: clampedRect) else { return }
+
+        let ciImage = CIImage(cgImage: cropped)
+        let pixelScale = max(8, min(rect.width, rect.height) * imageScale / 8)
+        guard let filter = CIFilter(name: "CIPixellate") else { return }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(pixelScale as NSNumber, forKey: kCIInputScaleKey)
+
+        let ciContext = CIContext()
+        guard let output = filter.outputImage,
+              let pixelated = ciContext.createCGImage(output, from: ciImage.extent) else { return }
+
+        context.saveGState()
+        context.translateBy(x: rect.minX, y: rect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(pixelated, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+        context.restoreGState()
     }
 
     // MARK: - Arrow Drawing Helpers

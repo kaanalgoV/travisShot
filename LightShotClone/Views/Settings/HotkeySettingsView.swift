@@ -31,6 +31,7 @@ struct HotkeySettingsView: View {
                         ShortcutField(label: "Text", key: .shortcutText)
                         ShortcutField(label: "Marker", key: .shortcutMarker)
                         ShortcutField(label: "Number", key: .shortcutNumber)
+                        ShortcutField(label: "Blur", key: .shortcutBlur)
                         ShortcutField(label: "Freeze", key: .shortcutFreeze)
                         ShortcutField(label: "Clear All", key: .shortcutClearAll)
                     }
