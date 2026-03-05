@@ -67,9 +67,13 @@ else
 fi
 
 # Resource bundles from SPM build
+# SPM's generated Bundle.module accessor looks for bundles at Bundle.main.bundleURL
+# which is the .app root directory, NOT Contents/Resources/.
+# We must place bundles at both locations for compatibility.
 RELEASE_DIR="$PROJECT_ROOT/.build/release"
 for bundle in Defaults_Defaults.bundle KeyboardShortcuts_KeyboardShortcuts.bundle TravisShot_TravisShot.bundle; do
     if [ -d "$RELEASE_DIR/$bundle" ]; then
+        cp -R "$RELEASE_DIR/$bundle" "$APP_DIR/"
         cp -R "$RELEASE_DIR/$bundle" "$APP_DIR/Contents/Resources/"
     fi
 done
