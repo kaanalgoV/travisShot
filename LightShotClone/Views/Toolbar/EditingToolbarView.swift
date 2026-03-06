@@ -5,6 +5,7 @@ struct EditingToolbarView: View {
     @ObservedObject var annotationVM: AnnotationViewModel
     var isFrozen: Bool
     var onToggleFreeze: () -> Void
+    var onOCR: () -> Void
     var onClose: () -> Void
     @State private var showColorPicker = false
 
@@ -27,6 +28,19 @@ struct EditingToolbarView: View {
             }
             .popover(isPresented: $showColorPicker) {
                 ColorPickerPopover(selectedColor: $annotationVM.currentColor)
+            }
+
+            Divider()
+                .frame(width: 28)
+                .padding(.vertical, 2)
+
+            // OCR text recognition
+            ToolButton(
+                systemImage: "doc.text.viewfinder",
+                isSelected: false,
+                tooltip: "OCR Text Recognition (\(Defaults[.shortcutOCR].uppercased()))"
+            ) {
+                onOCR()
             }
 
             Divider()

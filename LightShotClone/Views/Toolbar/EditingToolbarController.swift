@@ -7,29 +7,39 @@ final class EditingToolbarController {
     private(set) var isFrozen: Bool
     private var onToggleFreeze: (() -> Void)?
     private var onClose: (() -> Void)?
+    private var onOCR: (() -> Void)?
 
     init(annotationVM: AnnotationViewModel, isFrozen: Bool = false) {
         self.annotationVM = annotationVM
         self.isFrozen = isFrozen
     }
 
-    func show(near selectionRect: NSRect, onToggleFreeze: @escaping () -> Void = {}, onClose: @escaping () -> Void) {
+    func show(
+        near selectionRect: NSRect,
+        onToggleFreeze: @escaping () -> Void = {},
+        onOCR: @escaping () -> Void = {},
+        onClose: @escaping () -> Void
+    ) {
         self.onToggleFreeze = onToggleFreeze
+        self.onOCR = onOCR
         self.onClose = onClose
 
         let toolbarWidth: CGFloat = 50
-        let toolbarHeight: CGFloat = 400
+        let toolbarHeight: CGFloat = 440
         let margin: CGFloat = 8
+
+        // Find the screen containing the selection to constrain toolbar positioning
+        let selectionCenter = CGPoint(x: selectionRect.midX, y: selectionRect.midY)
+        let screen = NSScreen.screens.first { $0.frame.contains(selectionCenter) } ?? NSScreen.main ?? NSScreen.screens[0]
 
         var x = selectionRect.maxX + margin
         let y = selectionRect.maxY - toolbarHeight
 
-        let screenMaxX = NSScreen.main?.frame.maxX ?? 1920
-        if x + toolbarWidth > screenMaxX {
+        if x + toolbarWidth > screen.frame.maxX {
             x = selectionRect.minX - toolbarWidth - margin
         }
 
-        let frame = NSRect(x: x, y: max(y, 0), width: toolbarWidth, height: toolbarHeight)
+        let frame = NSRect(x: x, y: max(y, screen.frame.minY), width: toolbarWidth, height: toolbarHeight)
 
         let panel = NSPanel(
             contentRect: frame,
@@ -76,6 +86,7 @@ final class EditingToolbarController {
             annotationVM: annotationVM,
             isFrozen: isFrozen,
             onToggleFreeze: { [weak self] in self?.onToggleFreeze?() },
+            onOCR: { [weak self] in self?.onOCR?() },
             onClose: { [weak self] in self?.onClose?() }
         )
     }

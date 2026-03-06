@@ -14,11 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var drawingCanvas: DrawingCanvasNSView?
     private var localKeyMonitor: Any?
     private var settingsWindow: NSWindow?
+    private var ocrOverlayView: OCROverlayView?
 
     /// Set to true only when the user explicitly clicks "Quit"
     var userRequestedQuit = false
 
-    private var screenCapture: CGImage?
+    private var screenCaptures: [CGDirectDisplayID: CGImage] = [:]
+    /// The capture for the display where the user made their selection
+    private var selectedCapture: CGImage?
     /// Selection rect in SwiftUI coordinates (top-left origin) - used for image cropping
     private var selectionRectForCrop: CGRect?
     /// Selection rect in screen coordinates (bottom-left origin) - used for window positioning
@@ -166,10 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             do {
-                let displays = try await ScreenCaptureService.availableDisplays()
-                guard let display = displays.first else { return }
-                screenCapture = try await ScreenCaptureService.captureFullScreen(
-                    display: display,
+                screenCaptures = try await ScreenCaptureService.captureAllDisplays(
                     showCursor: Defaults[.captureCursor]
                 )
             } catch {
@@ -185,13 +185,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.onCancel = { [weak self] in
                 self?.dismissAll()
             }
-            overlay.showOverlays(frozenImage: screenCapture)
+            overlay.showOverlays(frozenImages: screenCaptures)
+            overlayController = overlay
 
             if Defaults[.keepSelectionPosition], let lastRect = lastSelectionSwiftUIRect {
                 overlay.restoreSelection(lastRect)
             }
-
-            overlayController = overlay
         }
     }
 
@@ -199,10 +198,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func onSelectionComplete(swiftUIRect: CGRect, screen: NSScreen) {
         currentScreen = screen
+        selectedCapture = screenCaptures[screen.displayID]
 
-        // Save selection position if "Keep selection position" is enabled
+        // Save unified selection rect for "Keep selection position" feature
         if Defaults[.keepSelectionPosition] {
-            lastSelectionSwiftUIRect = swiftUIRect
+            lastSelectionSwiftUIRect = overlayController?.unifiedSelectionRect
         }
 
         // Store SwiftUI rect (top-left origin) for image cropping
@@ -222,7 +222,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         showAnnotationCanvas(screenRect: screenRect, screen: screen)
 
-        let editToolbar = EditingToolbarController(annotationVM: annotationVM, isFrozen: screenCapture != nil)
+        // Enable resize/move on the annotation canvas
+        drawingCanvas?.editableSelectionRect = swiftUIRect
+        drawingCanvas?.onSelectionChanged = { [weak self] newCanvasRect in
+            self?.handleSelectionChanged(newCanvasRect)
+        }
+
+        let editToolbar = EditingToolbarController(annotationVM: annotationVM, isFrozen: !screenCaptures.isEmpty)
         editToolbar.show(
             near: screenRect,
             onToggleFreeze: { [weak self] in
@@ -234,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.captureAndFreeze(editToolbar: editToolbar)
                 }
             },
+            onOCR: { [weak self] in self?.performOCR() },
             onClose: { [weak self] in
                 self?.dismissAll()
             }
@@ -252,6 +259,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         actionToolbar = actToolbar
 
         installKeyMonitor()
+    }
+
+    /// Called when the user resizes or moves the selection on the annotation canvas
+    private func handleSelectionChanged(_ newCanvasRect: CGRect) {
+        guard let screen = currentScreen else { return }
+
+        // Update crop rect (canvas uses same coord system: top-left origin)
+        selectionRectForCrop = newCanvasRect
+
+        // Convert to screen coords (bottom-left origin) for toolbar positioning
+        let newScreenRect = CGRect(
+            x: screen.frame.origin.x + newCanvasRect.origin.x,
+            y: screen.frame.origin.y + screen.frame.height - newCanvasRect.origin.y - newCanvasRect.height,
+            width: newCanvasRect.width,
+            height: newCanvasRect.height
+        )
+        selectionRectScreen = newScreenRect
+
+        // Reposition toolbars
+        editingToolbar?.reposition(near: newScreenRect)
+        actionToolbar?.reposition(near: newScreenRect)
+
+        // Update overlay dimming cutout
+        overlayController?.updateSelectionFromCanvas(newCanvasRect, screen: screen)
     }
 
     private func showAnnotationCanvas(screenRect: CGRect, screen: NSScreen) {
@@ -278,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel: annotationVM,
             frame: NSRect(origin: .zero, size: fullScreenRect.size)
         )
-        canvas.screenCapture = screenCapture
+        canvas.screenCapture = selectedCapture
         canvas.autoresizingMask = [.width, .height]
         window.contentView = canvas
         drawingCanvas = canvas
@@ -334,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return nil
                 }
                 if char == Defaults[.shortcutBlur] { self.annotationVM.selectTool(.blur); return nil }
+                if char == Defaults[.shortcutOCR] { self.performOCR(); return nil }
                 if char == Defaults[.shortcutClearAll] {
                     self.annotationVM.clearAll()
                     self.drawingCanvas?.forceRedraw()
@@ -368,15 +400,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func captureAndFreeze(editToolbar: EditingToolbarController) {
         Task { @MainActor in
             do {
-                let displays = try await ScreenCaptureService.availableDisplays()
-                guard let display = displays.first else { return }
-                let newCapture = try await ScreenCaptureService.captureFullScreen(
-                    display: display,
+                let newCaptures = try await ScreenCaptureService.captureAllDisplays(
                     showCursor: Defaults[.captureCursor]
                 )
-                self.screenCapture = newCapture
-                self.drawingCanvas?.screenCapture = newCapture
-                self.overlayController?.freeze(newImage: newCapture)
+                self.screenCaptures = newCaptures
+                if let screen = self.currentScreen {
+                    self.selectedCapture = newCaptures[screen.displayID]
+                }
+                self.drawingCanvas?.screenCapture = self.selectedCapture
+                self.overlayController?.freeze(newImages: newCaptures)
                 editToolbar.setFrozen(true)
             } catch {
                 debugLog("Re-freeze capture failed: \(error)")
@@ -384,11 +416,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - OCR
+
+    private func performOCR() {
+        guard let capture = selectedCapture, let cropRect = selectionRectForCrop, let screen = currentScreen else { return }
+
+        let screenWidth = screen.frame.width
+        let scale = CGFloat(capture.width) / screenWidth
+        let scaledRect = CGRect(
+            x: cropRect.origin.x * scale,
+            y: cropRect.origin.y * scale,
+            width: cropRect.width * scale,
+            height: cropRect.height * scale
+        )
+        guard let croppedImage = capture.cropping(to: scaledRect) else { return }
+
+        Task { @MainActor in
+            do {
+                let blocks = try await OCRService.recognize(in: croppedImage)
+                if blocks.isEmpty {
+                    self.showSuccessFeedback("No text found")
+                    return
+                }
+                self.showOCROverlay(blocks: blocks, selectionRect: cropRect)
+            } catch {
+                self.showSuccessFeedback("OCR failed")
+            }
+        }
+    }
+
+    private func showOCROverlay(blocks: [RecognizedTextBlock], selectionRect: CGRect) {
+        // Remove any existing OCR overlay
+        ocrOverlayView?.removeFromSuperview()
+        ocrOverlayView = nil
+
+        guard let contentView = annotationWindow?.contentView else { return }
+
+        let overlay = OCROverlayView(
+            textBlocks: blocks,
+            imageSize: selectionRect.size,
+            onCopyBlock: { [weak self] text in
+                ClipboardService.copyText(text)
+                let preview = String(text.prefix(30))
+                self?.showSuccessFeedback("Copied: \(preview)")
+            },
+            onCopyAll: { [weak self] in
+                guard let self = self else { return }
+                let allText = blocks.map(\.text).joined(separator: "\n")
+                ClipboardService.copyText(allText)
+                self.showSuccessFeedback("Copied all text")
+                self.ocrOverlayView?.removeFromSuperview()
+                self.ocrOverlayView = nil
+            },
+            onDismiss: { [weak self] in
+                self?.ocrOverlayView?.removeFromSuperview()
+                self?.ocrOverlayView = nil
+            }
+        )
+
+        // Position overlay to match the selection rect within the full-screen annotation canvas
+        // The canvas uses top-left origin and covers the full screen
+        overlay.frame = selectionRect
+        contentView.addSubview(overlay)
+        ocrOverlayView = overlay
+    }
+
     // MARK: - Actions
 
     private func getFinalImage() -> NSImage? {
         // Use SwiftUI rect (top-left origin) for cropping - matches CGImage coordinate system
-        guard let capture = screenCapture, let rect = selectionRectForCrop else { return nil }
+        guard let capture = selectedCapture, let rect = selectionRectForCrop else { return nil }
 
         // Compute actual scale from CGImage vs screen dimensions (handles both point/pixel SCDisplay)
         let screenWidth = currentScreen?.frame.width ?? 1440
@@ -494,8 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func captureAndSaveFullScreen() {
         Task { @MainActor in
             do {
-                let displays = try await ScreenCaptureService.availableDisplays()
-                guard let display = displays.first else { return }
+                let display = try await ScreenCaptureService.displayForPoint(NSEvent.mouseLocation)
                 let capture = try await ScreenCaptureService.captureFullScreen(
                     display: display,
                     showCursor: Defaults[.captureCursor]
@@ -512,8 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func captureAndUploadFullScreen() {
         Task {
             do {
-                let displays = try await ScreenCaptureService.availableDisplays()
-                guard let display = displays.first else { return }
+                let display = try await ScreenCaptureService.displayForPoint(NSEvent.mouseLocation)
                 let capture = try await ScreenCaptureService.captureFullScreen(
                     display: display,
                     showCursor: Defaults[.captureCursor]
@@ -560,9 +655,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editingToolbar = nil
         actionToolbar?.dismiss()
         actionToolbar = nil
+        ocrOverlayView?.removeFromSuperview()
+        ocrOverlayView = nil
         annotationWindow?.close()
         annotationWindow = nil
-        screenCapture = nil
+        screenCaptures.removeAll()
+        selectedCapture = nil
         selectionRectForCrop = nil
         selectionRectScreen = nil
         currentScreen = nil
