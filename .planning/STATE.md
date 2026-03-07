@@ -4,7 +4,7 @@
 **Started:** 2026-03-06
 **Current phase:** Feature Development
 
-Last activity: 2026-03-06 - Completed quick task 1: OCR text recognition button - select and copy text from overlay area
+Last activity: 2026-03-07 - Completed quick task 2: OCR text selection - replace block-click with I-beam NSTextView selection
 
 ### Current Focus
 Advanced feature development
@@ -17,3 +17,4 @@ None
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | OCR text recognition button - select and copy text from overlay area | 2026-03-06 | eb777f9 | [1-ocr-text-recognition-button-select-and-c](./quick/1-ocr-text-recognition-button-select-and-c/) |
+| 2 | OCR text selection - replace block-click with I-beam NSTextView selection | 2026-03-07 | 81d7405 | [2-ocr-text-selection-replace-block-click-w](./quick/2-ocr-text-selection-replace-block-click-w/) |
