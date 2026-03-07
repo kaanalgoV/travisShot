@@ -335,8 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // Cmd+key: action shortcuts (configurable)
+            // Skip copy shortcut when OCR overlay is active so NSTextView handles Cmd+C natively
             if cmd, let char = char {
-                if char == Defaults[.shortcutCopy] { self.copyToClipboard(); return nil }
+                if char == Defaults[.shortcutCopy] && self.ocrOverlayView == nil { self.copyToClipboard(); return nil }
                 if char == Defaults[.shortcutSave] { self.saveToFile(); return nil }
                 if char == Defaults[.shortcutUpload] { self.uploadScreenshot(); return nil }
                 if char == Defaults[.shortcutPrint] { self.printScreenshot(); return nil }
@@ -479,6 +480,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.frame = selectionRect
         contentView.addSubview(overlay)
         ocrOverlayView = overlay
+
+        // Ensure the overlay (and its NSTextView subviews) receive keyboard/mouse events
+        annotationWindow?.makeFirstResponder(overlay)
     }
 
     // MARK: - Actions
