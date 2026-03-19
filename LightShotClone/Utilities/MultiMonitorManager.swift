@@ -1,5 +1,13 @@
 import AppKit
 
+extension NSScreen {
+    /// The CGDirectDisplayID for this screen
+    var displayID: CGDirectDisplayID {
+        guard let num = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return 0 }
+        return CGDirectDisplayID(num.uint32Value)
+    }
+}
+
 enum MultiMonitorManager {
     /// Get all connected screens
     static var allScreens: [NSScreen] {
@@ -21,6 +29,6 @@ enum MultiMonitorManager {
 
     /// Union of all screen frames
     static var totalFrame: NSRect {
-        NSScreen.screens.reduce(.zero) { $0.union($1.frame) }
+        NSScreen.screens.reduce(.null) { $0.union($1.frame) }
     }
 }

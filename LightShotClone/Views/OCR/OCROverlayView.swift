@@ -3,14 +3,13 @@ import AppKit
 final class OCROverlayView: NSView {
     private let textBlocks: [RecognizedTextBlock]
     private let imageSize: CGSize
-    private let onCopyBlock: (String) -> Void
     private let onCopyAll: () -> Void
     private let onDismiss: () -> Void
 
     private var copyAllButton: NSButton?
     private var dismissButton: NSButton?
-    private var textViews: [NSTextView] = []
-    private var pillButtons: [NSButton] = []
+    private var textView: NSTextView?
+    private var scrollView: NSScrollView?
 
     override var isFlipped: Bool { true }
 
@@ -23,13 +22,11 @@ final class OCROverlayView: NSView {
     ) {
         self.textBlocks = textBlocks
         self.imageSize = imageSize
-        self.onCopyBlock = onCopyBlock
         self.onCopyAll = onCopyAll
         self.onDismiss = onDismiss
         super.init(frame: .zero)
 
-        setupTextViews()
-        setupPillButtons()
+        setupSingleTextView()
         setupControlButtons()
     }
 
@@ -38,8 +35,6 @@ final class OCROverlayView: NSView {
     // MARK: - Block Rects
 
     private func blockRect(for block: RecognizedTextBlock) -> NSRect {
-        // Vision boundingBox: bottom-left origin, normalized 0-1
-        // isFlipped=true means our view has top-left origin
         let x = block.boundingBox.origin.x * imageSize.width
         let y = (1.0 - block.boundingBox.origin.y - block.boundingBox.height) * imageSize.height
         let w = block.boundingBox.width * imageSize.width
@@ -49,86 +44,87 @@ final class OCROverlayView: NSView {
 
     // MARK: - Setup
 
-    private func setupTextViews() {
-        for block in textBlocks {
-            let rect = blockRect(for: block)
-            let fontSize = estimateFontSize(for: block, blockRect: rect)
+    private func setupSingleTextView() {
+        guard !textBlocks.isEmpty else { return }
 
-            let textView = makeTextView(text: block.text, frame: rect, fontSize: fontSize)
-            addSubview(textView)
-            textViews.append(textView)
+        // Build a single attributed string with all blocks, using paragraph spacing
+        // to approximate vertical positions from the image
+        let fullAttr = NSMutableAttributedString()
+
+        // Sort blocks top-to-bottom (they should already be sorted, but ensure it)
+        let sorted = textBlocks.sorted { lhs, rhs in
+            let lhsY = (1.0 - lhs.boundingBox.origin.y - lhs.boundingBox.height)
+            let rhsY = (1.0 - rhs.boundingBox.origin.y - rhs.boundingBox.height)
+            if abs(lhsY - rhsY) > 0.005 { return lhsY < rhsY }
+            return lhs.boundingBox.origin.x < rhs.boundingBox.origin.x
         }
-    }
 
-    private func makeTextView(text: String, frame: NSRect, fontSize: CGFloat) -> NSTextView {
-        let textView = NSTextView(frame: frame)
-        textView.string = text
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.drawsBackground = true
-        textView.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.08)
-        textView.textColor = NSColor.labelColor
-        textView.font = NSFont.systemFont(ofSize: fontSize)
-        textView.textContainerInset = NSSize.zero
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainer?.widthTracksTextView = true
-        textView.isVerticallyResizable = false
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = []
-        // Allow natural selection cursor behavior (I-beam appears automatically)
-        return textView
-    }
+        // Calculate rects in pixel space
+        let blockRects = sorted.map { blockRect(for: $0) }
 
-    private func estimateFontSize(for block: RecognizedTextBlock, blockRect: NSRect) -> CGFloat {
-        // Try to use average character height from characterRects
-        if !block.characterRects.isEmpty {
-            let avgNormHeight = block.characterRects.map(\.rect.height).reduce(0, +) / CGFloat(block.characterRects.count)
-            let avgPixelHeight = avgNormHeight * imageSize.height
-            // Font ascender is roughly 80% of total height
-            let estimated = avgPixelHeight * 0.8
-            if estimated > 6 { return estimated }
-        }
-        // Fallback: block height * 0.7
-        return max(8, blockRect.height * 0.7)
-    }
+        for (i, block) in sorted.enumerated() {
+            let rect = blockRects[i]
+            let fontSize = max(8, rect.height / 1.2)
 
-    private func setupPillButtons() {
-        for (index, block) in textBlocks.enumerated() {
-            let rect = blockRect(for: block)
+            // Calculate spacing before this block
+            var spacingBefore: CGFloat = 0
+            if i > 0 {
+                let prevRect = blockRects[i - 1]
+                let gap = rect.minY - prevRect.maxY
+                spacingBefore = max(0, gap)
+            } else {
+                spacingBefore = rect.minY
+            }
 
-            let maxChars = 30
-            let displayText = block.text.count > maxChars
-                ? String(block.text.prefix(maxChars)) + "…"
-                : block.text
+            let para = NSMutableParagraphStyle()
+            para.paragraphSpacingBefore = spacingBefore
+            para.lineBreakMode = .byWordWrapping
 
-            let button = NSButton(title: displayText, target: self, action: #selector(pillButtonClicked(_:)))
-            button.tag = index
-            button.bezelStyle = .roundRect
-            button.isBordered = false
-            button.wantsLayer = true
-            button.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
-            button.layer?.cornerRadius = 4
-            button.contentTintColor = NSColor.white
-            button.font = NSFont.systemFont(ofSize: 10)
-
-            // Size the button to fit its text
+            // Completely transparent text — only selection highlight visible
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 10),
-                .foregroundColor: NSColor.white
+                .font: NSFont.systemFont(ofSize: fontSize),
+                .foregroundColor: NSColor.clear,
+                .paragraphStyle: para
             ]
-            let textSize = (displayText as NSString).size(withAttributes: attrs)
-            let pillPadding: CGFloat = 8
-            let pillW = textSize.width + pillPadding * 2
-            let pillH = textSize.height + 4
-            let pillX = rect.minX
-            // Place pill 2pt above the text block (above = smaller Y in flipped coords)
-            let pillY = rect.minY - pillH - 2
-            let clampedPillY = max(0, pillY)
 
-            button.frame = NSRect(x: pillX, y: clampedPillY, width: pillW, height: pillH)
-            addSubview(button)
-            pillButtons.append(button)
+            if i > 0 {
+                fullAttr.append(NSAttributedString(string: "\n", attributes: attrs))
+            }
+            fullAttr.append(NSAttributedString(string: block.text, attributes: attrs))
         }
+
+        // Use NSScrollView + NSTextView for proper text handling
+        let sv = NSScrollView(frame: bounds)
+        sv.hasVerticalScroller = false
+        sv.hasHorizontalScroller = false
+        sv.borderType = .noBorder
+        sv.drawsBackground = false
+        sv.autoresizingMask = [.width, .height]
+
+        let tv = NSTextView(frame: bounds)
+        tv.textStorage?.setAttributedString(fullAttr)
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.drawsBackground = false
+        tv.backgroundColor = .clear
+        tv.insertionPointColor = .clear
+        tv.textContainerInset = NSSize.zero
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.textContainer?.widthTracksTextView = true
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+
+        // Selection: subtle semi-transparent highlight, white text
+        tv.selectedTextAttributes = [
+            .backgroundColor: NSColor.systemBlue.withAlphaComponent(0.35),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9)
+        ]
+
+        sv.documentView = tv
+        addSubview(sv)
+        scrollView = sv
+        textView = tv
     }
 
     private func setupControlButtons() {
@@ -151,6 +147,9 @@ final class OCROverlayView: NSView {
 
     override func layout() {
         super.layout()
+
+        scrollView?.frame = bounds
+
         let btnH: CGFloat = 22
         let btnW: CGFloat = 64
         let dismissW: CGFloat = 28
@@ -170,24 +169,11 @@ final class OCROverlayView: NSView {
         )
     }
 
-    // MARK: - Drawing
+    // MARK: - Cursor
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        // Draw subtle highlight behind each text block
-        for block in textBlocks {
-            let rect = blockRect(for: block)
-            ctx.setFillColor(NSColor.systemBlue.withAlphaComponent(0.05).cgColor)
-            ctx.fill(rect)
-
-            // Draw a subtle border so users can see text regions
-            ctx.setStrokeColor(NSColor.systemBlue.withAlphaComponent(0.25).cgColor)
-            ctx.setLineWidth(1)
-            ctx.stroke(rect)
-        }
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .iBeam)
     }
 
     // MARK: - Keyboard
@@ -203,12 +189,6 @@ final class OCROverlayView: NSView {
     }
 
     // MARK: - Button Actions
-
-    @objc private func pillButtonClicked(_ sender: NSButton) {
-        let index = sender.tag
-        guard index < textBlocks.count else { return }
-        onCopyBlock(textBlocks[index].text)
-    }
 
     @objc private func copyAllClicked() {
         onCopyAll()

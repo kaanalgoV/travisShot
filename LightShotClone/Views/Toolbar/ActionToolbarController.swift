@@ -14,14 +14,18 @@ final class ActionToolbarController {
         let toolbarHeight: CGFloat = 50
         let margin: CGFloat = 8
 
+        // Find the screen containing the selection to constrain toolbar positioning
+        let selectionCenter = CGPoint(x: selectionRect.midX, y: selectionRect.midY)
+        let screen = NSScreen.screens.first { $0.frame.contains(selectionCenter) } ?? NSScreen.main ?? NSScreen.screens[0]
+
         let x = selectionRect.maxX - toolbarWidth
         var y = selectionRect.minY - toolbarHeight - margin
 
-        if y < 0 {
+        if y < screen.frame.minY {
             y = selectionRect.maxY + margin
         }
 
-        let frame = NSRect(x: max(x, 0), y: y, width: toolbarWidth, height: toolbarHeight)
+        let frame = NSRect(x: max(x, screen.frame.minX), y: y, width: toolbarWidth, height: toolbarHeight)
 
         let panel = NSPanel(
             contentRect: frame,

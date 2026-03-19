@@ -10,8 +10,7 @@ final class NonDraggableWindow: NSWindow {
         // Do nothing -- prevent all window dragging
     }
 
-    // Forward scroll events to the content view
     override func scrollWheel(with event: NSEvent) {
-        contentView?.scrollWheel(with: event)
+        super.scrollWheel(with: event)
     }
 }

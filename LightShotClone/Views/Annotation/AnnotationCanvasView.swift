@@ -26,8 +26,30 @@ final class DrawingCanvasNSView: NSView {
     private var isDraggingText = false
     private var draggingTextIndex: Int? = nil
 
+    /// When true, the canvas defers cursor/mouse to the OCR overlay
+    var isOCRActive = false
+
     /// Tracking area for cursor changes
     private var cursorTrackingArea: NSTrackingArea?
+
+    // MARK: - Editable Selection Rect
+
+    /// The editable selection rectangle (in canvas flipped coords)
+    var editableSelectionRect: CGRect? {
+        didSet { needsDisplay = true }
+    }
+    var onSelectionChanged: ((CGRect) -> Void)?
+
+    private var isResizingSelRect = false
+    private var isMovingSelRect = false
+    private var activeSelHandle: SelHandle? = nil
+    private var selDragStart: CGPoint = .zero
+    private let selHandleSize: CGFloat = 8
+
+    enum SelHandle: CaseIterable {
+        case topLeft, topRight, bottomLeft, bottomRight
+        case top, bottom, left, right
+    }
 
     init(viewModel: AnnotationViewModel, frame: NSRect) {
         self.viewModel = viewModel
@@ -76,7 +98,7 @@ final class DrawingCanvasNSView: NSView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -85,7 +107,22 @@ final class DrawingCanvasNSView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // When OCR overlay is active, let it handle cursor
+        if isOCRActive { return }
+
         let point = convert(event.locationInWindow, from: nil)
+
+        // Selection handle cursor (highest priority)
+        if let handle = hitTestSelHandle(at: point) {
+            cursorForSelHandle(handle).set()
+            return
+        }
+
+        // Inside selection with no tool → openHand
+        if shouldMoveSelection(at: point) {
+            NSCursor.openHand.set()
+            return
+        }
 
         if viewModel.selectedTool == .text {
             // Show move cursor when hovering over existing text annotation
@@ -137,6 +174,8 @@ final class DrawingCanvasNSView: NSView {
         if let current = viewModel.currentAnnotation {
             drawAnnotation(current, in: ctx)
         }
+
+        drawEditableSelection(in: ctx)
     }
 
     private func drawAnnotation(_ annotation: Annotation, in ctx: CGContext) {
@@ -316,12 +355,197 @@ final class DrawingCanvasNSView: NSView {
         ctx.strokePath()
     }
 
+    // MARK: - Editable Selection Drawing & Hit Testing
+
+    private func drawEditableSelection(in ctx: CGContext) {
+        guard let rect = editableSelectionRect else { return }
+
+        // Border
+        ctx.saveGState()
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+        ctx.setLineWidth(1)
+        ctx.setLineDash(phase: 0, lengths: [])
+        ctx.stroke(rect)
+        ctx.restoreGState()
+
+        // Handles
+        ctx.setFillColor(NSColor.white.cgColor)
+        for handle in SelHandle.allCases {
+            ctx.fill(selHandleRect(for: handle, in: rect))
+        }
+
+        // Dimension label
+        let dimStr = "\(Int(rect.width)) x \(Int(rect.height))" as NSString
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        let textSize = dimStr.size(withAttributes: attrs)
+        let labelX = rect.minX + 4
+        let labelY = max(rect.minY - textSize.height - 6, 2)
+
+        ctx.saveGState()
+        ctx.setFillColor(NSColor(white: 0, alpha: 0.7).cgColor)
+        let bgRect = CGRect(x: labelX - 4, y: labelY - 2, width: textSize.width + 8, height: textSize.height + 4)
+        ctx.addPath(CGPath(roundedRect: bgRect, cornerWidth: 3, cornerHeight: 3, transform: nil))
+        ctx.fillPath()
+        ctx.restoreGState()
+
+        dimStr.draw(at: CGPoint(x: labelX, y: labelY), withAttributes: attrs)
+    }
+
+    private func selHandleRect(for handle: SelHandle, in rect: CGRect) -> CGRect {
+        let hs = selHandleSize
+        switch handle {
+        case .topLeft:     return CGRect(x: rect.minX - hs/2, y: rect.minY - hs/2, width: hs, height: hs)
+        case .topRight:    return CGRect(x: rect.maxX - hs/2, y: rect.minY - hs/2, width: hs, height: hs)
+        case .bottomLeft:  return CGRect(x: rect.minX - hs/2, y: rect.maxY - hs/2, width: hs, height: hs)
+        case .bottomRight: return CGRect(x: rect.maxX - hs/2, y: rect.maxY - hs/2, width: hs, height: hs)
+        case .top:         return CGRect(x: rect.midX - hs/2, y: rect.minY - hs/2, width: hs, height: hs)
+        case .bottom:      return CGRect(x: rect.midX - hs/2, y: rect.maxY - hs/2, width: hs, height: hs)
+        case .left:        return CGRect(x: rect.minX - hs/2, y: rect.midY - hs/2, width: hs, height: hs)
+        case .right:       return CGRect(x: rect.maxX - hs/2, y: rect.midY - hs/2, width: hs, height: hs)
+        }
+    }
+
+    private func hitTestSelHandle(at point: CGPoint) -> SelHandle? {
+        guard let rect = editableSelectionRect else { return nil }
+        for handle in SelHandle.allCases {
+            let hr = selHandleRect(for: handle, in: rect).insetBy(dx: -4, dy: -4)
+            if hr.contains(point) { return handle }
+        }
+        return nil
+    }
+
+    private func updateSelResize(to point: CGPoint, handle: SelHandle) {
+        guard var rect = editableSelectionRect else { return }
+
+        switch handle {
+        case .topLeft:
+            rect = CGRect(x: point.x, y: point.y, width: rect.maxX - point.x, height: rect.maxY - point.y)
+        case .topRight:
+            rect = CGRect(x: rect.minX, y: point.y, width: point.x - rect.minX, height: rect.maxY - point.y)
+        case .bottomLeft:
+            rect = CGRect(x: point.x, y: rect.minY, width: rect.maxX - point.x, height: point.y - rect.minY)
+        case .bottomRight:
+            rect = CGRect(x: rect.minX, y: rect.minY, width: point.x - rect.minX, height: point.y - rect.minY)
+        case .top:
+            rect = CGRect(x: rect.minX, y: point.y, width: rect.width, height: rect.maxY - point.y)
+        case .bottom:
+            rect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: point.y - rect.minY)
+        case .left:
+            rect = CGRect(x: point.x, y: rect.minY, width: rect.maxX - point.x, height: rect.height)
+        case .right:
+            rect = CGRect(x: rect.minX, y: rect.minY, width: point.x - rect.minX, height: rect.height)
+        }
+
+        // Normalize to prevent negative sizes
+        editableSelectionRect = CGRect(
+            x: min(rect.origin.x, rect.origin.x + rect.width),
+            y: min(rect.origin.y, rect.origin.y + rect.height),
+            width: abs(rect.width),
+            height: abs(rect.height)
+        )
+    }
+
+    private func cursorForSelHandle(_ handle: SelHandle) -> NSCursor {
+        switch handle {
+        case .topLeft, .bottomRight: return Self.nwseResizeCursor
+        case .topRight, .bottomLeft: return Self.neswResizeCursor
+        case .top, .bottom:          return .resizeUpDown
+        case .left, .right:          return .resizeLeftRight
+        }
+    }
+
+    // Custom diagonal resize cursors
+    private static let nwseResizeCursor: NSCursor = makeDiagonalCursor(nwse: true)
+    private static let neswResizeCursor: NSCursor = makeDiagonalCursor(nwse: false)
+
+    private static func makeDiagonalCursor(nwse: Bool) -> NSCursor {
+        let size: CGFloat = 20
+        let image = NSImage(size: NSSize(width: size, height: size))
+        image.lockFocus()
+        let ctx = NSGraphicsContext.current!.cgContext
+        ctx.setShouldAntialias(true)
+        ctx.setLineWidth(1.5)
+        ctx.setStrokeColor(NSColor.white.cgColor)
+        ctx.setFillColor(NSColor.white.cgColor)
+        let m: CGFloat = 3, al: CGFloat = 5
+        if nwse {
+            ctx.move(to: CGPoint(x: m, y: size - m))
+            ctx.addLine(to: CGPoint(x: size - m, y: m))
+            ctx.strokePath()
+            ctx.move(to: CGPoint(x: m, y: size - m))
+            ctx.addLine(to: CGPoint(x: m + al, y: size - m))
+            ctx.addLine(to: CGPoint(x: m, y: size - m - al))
+            ctx.fillPath()
+            ctx.move(to: CGPoint(x: size - m, y: m))
+            ctx.addLine(to: CGPoint(x: size - m - al, y: m))
+            ctx.addLine(to: CGPoint(x: size - m, y: m + al))
+            ctx.fillPath()
+        } else {
+            ctx.move(to: CGPoint(x: size - m, y: size - m))
+            ctx.addLine(to: CGPoint(x: m, y: m))
+            ctx.strokePath()
+            ctx.move(to: CGPoint(x: size - m, y: size - m))
+            ctx.addLine(to: CGPoint(x: size - m - al, y: size - m))
+            ctx.addLine(to: CGPoint(x: size - m, y: size - m - al))
+            ctx.fillPath()
+            ctx.move(to: CGPoint(x: m, y: m))
+            ctx.addLine(to: CGPoint(x: m + al, y: m))
+            ctx.addLine(to: CGPoint(x: m, y: m + al))
+            ctx.fillPath()
+        }
+        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.4).cgColor)
+        ctx.setLineWidth(0.5)
+        if nwse {
+            ctx.move(to: CGPoint(x: m, y: size - m))
+            ctx.addLine(to: CGPoint(x: size - m, y: m))
+        } else {
+            ctx.move(to: CGPoint(x: size - m, y: size - m))
+            ctx.addLine(to: CGPoint(x: m, y: m))
+        }
+        ctx.strokePath()
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: NSPoint(x: size / 2, y: size / 2))
+    }
+
+    /// Whether a point is inside the selection but not on a handle, and no annotation tool is active
+    private func shouldMoveSelection(at point: CGPoint) -> Bool {
+        guard let rect = editableSelectionRect, rect.contains(point) else { return false }
+        let noTool = viewModel.selectedTool == nil
+        let selectNoHit = viewModel.selectedTool == .select && viewModel.hitTestAnnotation(at: point) == nil
+        return noTool || selectNoHit
+    }
+
     // MARK: - Mouse Events
 
     override func mouseDown(with event: NSEvent) {
+        // When OCR overlay is active, don't intercept clicks
+        if isOCRActive { return }
+
+        // Force TravisShot active so events don't leak to apps below (e.g. Bookmap)
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
 
         let point = convert(event.locationInWindow, from: nil)
+
+        // --- Selection resize handle (highest priority) ---
+        if let handle = hitTestSelHandle(at: point) {
+            isResizingSelRect = true
+            isMovingSelRect = false
+            activeSelHandle = handle
+            selDragStart = point
+            return
+        }
+
+        // --- Move selection (no tool or select-tool with no annotation hit) ---
+        if shouldMoveSelection(at: point) {
+            isMovingSelRect = true
+            isResizingSelRect = false
+            activeSelHandle = nil
+            selDragStart = point
+            NSCursor.closedHand.set()
+            return
+        }
 
         // --- Text tool: move existing text OR create new ---
         if viewModel.selectedTool == .text {
@@ -385,6 +609,22 @@ final class DrawingCanvasNSView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
+        // --- Selection resize ---
+        if isResizingSelRect, let handle = activeSelHandle {
+            updateSelResize(to: point, handle: handle)
+            return
+        }
+
+        // --- Selection move ---
+        if isMovingSelRect {
+            guard var rect = editableSelectionRect else { return }
+            rect.origin.x += point.x - selDragStart.x
+            rect.origin.y += point.y - selDragStart.y
+            editableSelectionRect = rect
+            selDragStart = point
+            return
+        }
+
         // Dragging text with text tool
         if isDraggingText, let idx = draggingTextIndex, viewModel.annotations.indices.contains(idx) {
             if !didPushUndoForDrag {
@@ -417,6 +657,17 @@ final class DrawingCanvasNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isResizingSelRect || isMovingSelRect {
+            isResizingSelRect = false
+            isMovingSelRect = false
+            activeSelHandle = nil
+            if let rect = editableSelectionRect {
+                onSelectionChanged?(rect)
+            }
+            needsDisplay = true
+            return
+        }
+
         if isDraggingText {
             isDraggingText = false
             draggingTextIndex = nil

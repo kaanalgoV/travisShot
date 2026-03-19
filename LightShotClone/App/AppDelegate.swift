@@ -167,6 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Prevent re-entry: if a capture session is already active, ignore the shortcut
         guard overlayController == nil else { return }
 
+        // Activate TravisShot so our windows receive mouse events (even when triggered via hotkey from another app)
+        NSApp.activate(ignoringOtherApps: true)
+
         Task { @MainActor in
             do {
                 screenCaptures = try await ScreenCaptureService.captureAllDisplays(
@@ -290,12 +293,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fullScreenRect = screen.frame
 
         let window = NonDraggableWindow(
-            contentRect: fullScreenRect,
+            contentRect: NSRect(origin: .zero, size: fullScreenRect.size),
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
+        // Position explicitly to the correct screen frame (avoids screen: parameter ambiguity)
+        window.setFrame(fullScreenRect, display: false)
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = NSWindow.Level(Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
@@ -304,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isMovable = false
         window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
 
         let canvas = DrawingCanvasNSView(
             viewModel: annotationVM,
@@ -314,8 +319,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = canvas
         drawingCanvas = canvas
 
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(canvas)
+
+        debugLog("annotationCanvas frame=\(window.frame) screen=\(fullScreenRect) level=\(window.level.rawValue)")
         annotationWindow = window
     }
 
@@ -466,10 +474,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let allText = blocks.map(\.text).joined(separator: "\n")
                 ClipboardService.copyText(allText)
                 self.showSuccessFeedback("Copied all text")
+                self.drawingCanvas?.isOCRActive = false
                 self.ocrOverlayView?.removeFromSuperview()
                 self.ocrOverlayView = nil
             },
             onDismiss: { [weak self] in
+                self?.drawingCanvas?.isOCRActive = false
                 self?.ocrOverlayView?.removeFromSuperview()
                 self?.ocrOverlayView = nil
             }
@@ -478,8 +488,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Position overlay to match the selection rect within the full-screen annotation canvas
         // The canvas uses top-left origin and covers the full screen
         overlay.frame = selectionRect
-        contentView.addSubview(overlay)
+        // Add above all other subviews so I-beam cursor takes priority over hand cursor
+        contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
         ocrOverlayView = overlay
+        drawingCanvas?.isOCRActive = true
 
         // Ensure the overlay (and its NSTextView subviews) receive keyboard/mouse events
         annotationWindow?.makeFirstResponder(overlay)
@@ -489,19 +501,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func getFinalImage() -> NSImage? {
         // Use SwiftUI rect (top-left origin) for cropping - matches CGImage coordinate system
-        guard let capture = selectedCapture, let rect = selectionRectForCrop else { return nil }
+        guard let capture = selectedCapture, let rect = selectionRectForCrop else {
+            debugLog("getFinalImage: no capture or rect")
+            return nil
+        }
 
         // Compute actual scale from CGImage vs screen dimensions (handles both point/pixel SCDisplay)
         let screenWidth = currentScreen?.frame.width ?? 1440
         let scale = CGFloat(capture.width) / screenWidth
-        let scaledRect = CGRect(
+
+        // Clamp scaled rect to image bounds to prevent out-of-bounds cropping
+        let rawScaledRect = CGRect(
             x: rect.origin.x * scale,
             y: rect.origin.y * scale,
             width: rect.width * scale,
             height: rect.height * scale
         )
+        let imageBounds = CGRect(x: 0, y: 0, width: capture.width, height: capture.height)
+        let scaledRect = rawScaledRect.intersection(imageBounds)
 
-        guard let cropped = capture.cropping(to: scaledRect) else { return nil }
+        guard !scaledRect.isNull, scaledRect.width > 0, scaledRect.height > 0 else {
+            debugLog("getFinalImage: scaledRect out of bounds — raw=\(rawScaledRect) imageBounds=\(imageBounds)")
+            return nil
+        }
+
+        debugLog("getFinalImage: capture=\(capture.width)×\(capture.height) rect=\(rect) scale=\(scale) scaledRect=\(scaledRect)")
+
+        guard let cropped = capture.cropping(to: scaledRect) else {
+            debugLog("getFinalImage: cropping returned nil")
+            return nil
+        }
 
         let finalCG = annotationVM.renderAnnotations(onto: cropped, selectionRect: rect, scale: scale) ?? cropped
 
@@ -659,6 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editingToolbar = nil
         actionToolbar?.dismiss()
         actionToolbar = nil
+        drawingCanvas?.isOCRActive = false
         ocrOverlayView?.removeFromSuperview()
         ocrOverlayView = nil
         annotationWindow?.close()

@@ -10,6 +10,7 @@ final class CaptureViewModel: ObservableObject {
     // Selection resize handles
     @Published var isResizing = false
     @Published var resizeHandle: ResizeHandle? = nil
+    @Published var isMoving = false
 
     // Screenshot data
     @Published var capturedImage: CGImage? = nil
@@ -34,23 +35,8 @@ final class CaptureViewModel: ObservableObject {
 
     /// Start a new selection drag
     func beginDrag(at point: CGPoint) {
-        // Check if we're clicking a resize handle
-        if let rect = selectionRect, let handle = hitTestHandle(at: point, in: rect) {
-            isResizing = true
-            resizeHandle = handle
-            dragStart = point
-            return
-        }
-
-        // Check if clicking inside existing selection (to move it)
-        if let rect = selectionRect, rect.contains(point) {
-            isResizing = true
-            resizeHandle = nil // nil = moving
-            dragStart = point
-            return
-        }
-
-        // New selection
+        // New selection (any previous selection is replaced)
+        isMoving = false
         dragStart = point
         dragCurrent = point
         selectionRect = nil
@@ -75,15 +61,8 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    /// End drag
+    /// End drag — immediately fires onSelectionComplete for valid selections
     func endDrag(at point: CGPoint) {
-        if isResizing {
-            isResizing = false
-            resizeHandle = nil
-            dragStart = nil
-            return
-        }
-
         updateDrag(to: point)
         dragStart = nil
         dragCurrent = nil
@@ -92,6 +71,13 @@ final class CaptureViewModel: ObservableObject {
             state = .selected(rect: rect)
             onSelectionComplete?(rect)
         }
+    }
+
+    /// Confirm the current selection → fires onSelectionComplete
+    func confirmSelection() {
+        guard let rect = selectionRect, rect.width > 5, rect.height > 5 else { return }
+        state = .selected(rect: rect)
+        onSelectionComplete?(rect)
     }
 
     /// Cancel the capture
@@ -109,6 +95,26 @@ final class CaptureViewModel: ObservableObject {
         rect.origin.x += dx
         rect.origin.y += dy
         selectionRect = rect
+    }
+
+    // MARK: - Cursor & Hit Testing
+
+    enum CursorZone {
+        case outside
+        case handle(ResizeHandle)
+        case inside
+    }
+
+    /// Determine what the cursor is over relative to the current selection
+    func cursorZone(at point: CGPoint) -> CursorZone {
+        guard let rect = selectionRect else { return .outside }
+        if let handle = hitTestHandle(at: point, in: rect) {
+            return .handle(handle)
+        }
+        if rect.contains(point) {
+            return .inside
+        }
+        return .outside
     }
 
     // MARK: - Resize Handles
@@ -130,7 +136,7 @@ final class CaptureViewModel: ObservableObject {
         }
     }
 
-    private func hitTestHandle(at point: CGPoint, in rect: CGRect) -> ResizeHandle? {
+    func hitTestHandle(at point: CGPoint, in rect: CGRect) -> ResizeHandle? {
         for handle in ResizeHandle.allCases {
             let hr = handleRect(for: handle, in: rect).insetBy(dx: -4, dy: -4)
             if hr.contains(point) { return handle }
